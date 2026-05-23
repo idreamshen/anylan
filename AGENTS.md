@@ -16,10 +16,12 @@ The current design is intentionally narrow:
 
 ## Repository Layout
 
-- `cmd/anylan`: client CLI. Currently supports `join`.
-- `cmd/anylan-server`: relay server CLI.
+- `cmd/client`: client CLI. Currently supports `join`.
+- `cmd/server`: control + relay server CLI.
 - `internal/client`: QUIC client session and TAP frame bridge.
-- `internal/relay`: relay server, room manager, peer allocation, frame forwarding.
+- `internal/server`: QUIC server listener, TLS setup, and lifecycle.
+- `internal/control`: server-side join control flow and stream handling.
+- `internal/relay`: room manager, peer allocation, MAC learning, and frame forwarding.
 - `internal/protocol`: wire message framing and JSON control messages.
 - `internal/tap`: Linux TAP device creation and interface configuration.
 
@@ -34,8 +36,8 @@ go test ./...
 Build both binaries:
 
 ```bash
-go build ./cmd/anylan
-go build ./cmd/anylan-server
+go build ./cmd/client
+go build ./cmd/server
 ```
 
 The client uses Linux TAP devices and `ip` commands, so real client runs require Linux and root privileges. Unit tests should not require root.
@@ -45,13 +47,13 @@ The client uses Linux TAP devices and `ip` commands, so real client runs require
 Start a local relay with an ephemeral self-signed certificate:
 
 ```bash
-go run ./cmd/anylan-server --listen :4433 --insecure-dev-cert
+go run ./cmd/server --listen :4433 --insecure-dev-cert
 ```
 
 Join from a Linux client:
 
 ```bash
-sudo go run ./cmd/anylan -- join \
+sudo go run ./cmd/client -- join \
   --server 127.0.0.1:4433 \
   --room my-room \
   --dev anylan0 \
@@ -65,7 +67,7 @@ For production-like TLS testing, pass `--tls-cert` and `--tls-key` to the server
 For end-to-end verification, use two Linux client machines:
 
 1. Start `anylan-server` on a reachable UDP port.
-2. Start `anylan join` on both clients with the same room code.
+2. Start `anylan-client join` on both clients with the same room code.
 3. Confirm both TAP interfaces receive `10.240.x.y/24` addresses.
 4. Ping the peer virtual IP in both directions.
 5. Start a LAN-discovery game and verify discovery or direct joining works.
@@ -97,11 +99,11 @@ current lab network, it has been reachable from the test servers at
 Typical real-machine smoke test flow:
 
 ```bash
-go build -o /tmp/anylan ./cmd/anylan
-go build -o /tmp/anylan-server ./cmd/anylan-server
+go build -o /tmp/anylan-client ./cmd/client
+go build -o /tmp/anylan-server ./cmd/server
 
-scp /tmp/anylan root@192.168.89.175:/tmp/anylan
-scp /tmp/anylan root@192.168.89.152:/tmp/anylan
+scp /tmp/anylan-client root@192.168.89.175:/tmp/anylan-client
+scp /tmp/anylan-client root@192.168.89.152:/tmp/anylan-client
 
 /tmp/anylan-server --listen :4433 --insecure-dev-cert
 ```
@@ -109,13 +111,13 @@ scp /tmp/anylan root@192.168.89.152:/tmp/anylan
 Then, in separate sessions:
 
 ```bash
-ssh -tt root@192.168.89.175 '/tmp/anylan join --server <relay-ip>:4433 --room manual-smoke --dev anylan0 --name test1 --insecure-skip-verify'
-ssh -tt root@192.168.89.152 '/tmp/anylan join --server <relay-ip>:4433 --room manual-smoke --dev anylan0 --name test2 --insecure-skip-verify'
+ssh -tt root@192.168.89.175 '/tmp/anylan-client join --server <relay-ip>:4433 --room manual-smoke --dev anylan0 --name test1 --insecure-skip-verify'
+ssh -tt root@192.168.89.152 '/tmp/anylan-client join --server <relay-ip>:4433 --room manual-smoke --dev anylan0 --name test2 --insecure-skip-verify'
 ```
 
 Confirm both clients receive `10.240.x.y/24` addresses, then ping each virtual IP
 from the other test server. Stop the client sessions with `Ctrl-C` and confirm no
-`/tmp/anylan join` process or `anylan0` device is left behind.
+`/tmp/anylan-client join` process or `anylan0` device is left behind.
 
 ## Implementation Notes
 

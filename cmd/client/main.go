@@ -14,7 +14,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 || os.Args[1] != "join" {
-		fmt.Fprintln(os.Stderr, "usage: anylan join --server host:4433 --room room-code [--dev anylan0]")
+		fmt.Fprintln(os.Stderr, "usage: anylan-client join --server host:4433 --room room-code [--dev anylan0]")
 		os.Exit(2)
 	}
 

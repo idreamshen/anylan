@@ -1,4 +1,4 @@
-package relay
+package server
 
 import (
 	"context"
@@ -9,16 +9,15 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net"
 	"net/netip"
-	"strings"
 	"time"
 
+	"github.com/idreamshen/anylan/internal/control"
 	"github.com/idreamshen/anylan/internal/protocol"
+	"github.com/idreamshen/anylan/internal/relay"
 	"github.com/quic-go/quic-go"
 )
 
@@ -67,7 +66,11 @@ func (s Server) Serve(ctx context.Context, listener *quic.Listener) error {
 		s.MTU = protocol.DefaultMTU
 	}
 
-	manager := NewManager(s.Pool)
+	manager := relay.NewManager(s.Pool)
+	handler := control.Handler{
+		Manager: manager,
+		MTU:     s.MTU,
+	}
 	for {
 		conn, err := listener.Accept(ctx)
 		if err != nil {
@@ -76,7 +79,7 @@ func (s Server) Serve(ctx context.Context, listener *quic.Listener) error {
 			}
 			return err
 		}
-		go s.handleConnection(ctx, manager, conn)
+		go handler.HandleConnection(ctx, conn)
 	}
 }
 
@@ -95,112 +98,6 @@ func (s Server) Listen(ctx context.Context, packetConn net.PacketConn) (*quic.Li
 	return quic.Listen(packetConn, tlsConfig, &quic.Config{
 		MaxIdleTimeout: 60 * time.Second,
 	})
-}
-
-func (s Server) handleConnection(ctx context.Context, manager *Manager, conn quic.Connection) {
-	closeConn := true
-	defer func() {
-		if closeConn {
-			conn.CloseWithError(0, "")
-		}
-	}()
-
-	stream, err := conn.AcceptStream(ctx)
-	if err != nil {
-		return
-	}
-	defer stream.Close()
-
-	var join protocol.JoinRoom
-	if err := protocol.ReadJSON(stream, protocol.TypeJoinRoom, protocol.MaxControlSize, &join); err != nil {
-		rejectAndCloseStream(stream, "invalid join request")
-		closeConn = false
-		return
-	}
-	join.Room = strings.TrimSpace(join.Room)
-	if join.Version != protocol.Version {
-		rejectAndCloseStream(stream, "unsupported protocol version")
-		closeConn = false
-		return
-	}
-	if join.Room == "" {
-		rejectAndCloseStream(stream, "room is required")
-		closeConn = false
-		return
-	}
-
-	peer, err := manager.Join(join.Room)
-	if err != nil {
-		rejectAndCloseStream(stream, err.Error())
-		closeConn = false
-		return
-	}
-	defer peer.Room.RemovePeer(peer)
-
-	accept := protocol.JoinAccept{
-		Version: protocol.Version,
-		Room:    join.Room,
-		PeerID:  peer.ID,
-		IPv4:    peer.IP.String(),
-		CIDR:    netip.PrefixFrom(peer.IP, peer.Room.Prefix().Bits()).String(),
-		MAC:     peer.MAC.String(),
-		MTU:     s.MTU,
-	}
-	if err := protocol.WriteJSON(stream, protocol.TypeJoinAccept, accept); err != nil {
-		return
-	}
-
-	writeErr := make(chan error, 1)
-	go func() {
-		for frame := range peer.Frames {
-			if err := protocol.WriteMessage(stream, protocol.TypeEthernetFrame, frame); err != nil {
-				writeErr <- err
-				return
-			}
-		}
-		writeErr <- nil
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-writeErr:
-			return
-		default:
-		}
-
-		typ, payload, err := protocol.ReadMessage(stream, protocol.MaxFrameSize)
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				return
-			}
-			return
-		}
-		switch typ {
-		case protocol.TypeEthernetFrame:
-			targets, err := peer.Room.Forward(peer, payload)
-			if err != nil {
-				continue
-			}
-			for _, target := range targets {
-				target.Enqueue(payload)
-			}
-		case protocol.TypePing:
-			if err := protocol.WriteMessage(stream, protocol.TypePong, payload); err != nil {
-				return
-			}
-		}
-	}
-}
-
-func reject(w io.Writer, reason string) error {
-	return protocol.WriteJSON(w, protocol.TypeJoinReject, protocol.JoinReject{Reason: reason})
-}
-
-func rejectAndCloseStream(stream quic.Stream, reason string) {
-	_ = reject(stream, reason)
-	_ = stream.Close()
 }
 
 func (s Server) tlsConfig() (*tls.Config, error) {

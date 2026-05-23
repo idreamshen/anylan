@@ -1,4 +1,4 @@
-package relay
+package server
 
 import (
 	"context"
@@ -187,4 +187,25 @@ func testTLSConfig() *tls.Config {
 		MinVersion:         tls.VersionTLS13,
 		InsecureSkipVerify: true,
 	}
+}
+
+func ethernetFrame(dst, src net.HardwareAddr) []byte {
+	frame := make([]byte, 60)
+	copy(frame[0:6], dst)
+	copy(frame[6:12], src)
+	frame[12] = 0x08
+	frame[13] = 0x00
+	return frame
+}
+
+func mac(s string) net.HardwareAddr {
+	hw, err := net.ParseMAC(s)
+	if err != nil {
+		panic(err)
+	}
+	return hw
+}
+
+func broadcastMAC() net.HardwareAddr {
+	return net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 }

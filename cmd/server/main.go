@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/idreamshen/anylan/internal/relay"
+	"github.com/idreamshen/anylan/internal/server"
 )
 
 func main() {
@@ -21,7 +21,7 @@ func main() {
 	)
 	flag.Parse()
 
-	parsedPool, err := relay.LoadPool(*pool)
+	parsedPool, err := server.LoadPool(*pool)
 	if err != nil {
 		log.Fatalf("invalid pool: %v", err)
 	}
@@ -29,7 +29,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	server := relay.Server{
+	srv := server.Server{
 		Addr:            *listen,
 		Pool:            parsedPool,
 		TLSCertFile:     *tlsCert,
@@ -38,7 +38,7 @@ func main() {
 		MTU:             *mtu,
 	}
 	log.Printf("anylan-server listening on %s with pool %s", *listen, parsedPool)
-	if err := server.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+	if err := srv.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
 		log.Fatal(err)
 	}
 }
