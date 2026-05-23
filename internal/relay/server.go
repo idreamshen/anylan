@@ -98,7 +98,12 @@ func (s Server) Listen(ctx context.Context, packetConn net.PacketConn) (*quic.Li
 }
 
 func (s Server) handleConnection(ctx context.Context, manager *Manager, conn quic.Connection) {
-	defer conn.CloseWithError(0, "")
+	closeConn := true
+	defer func() {
+		if closeConn {
+			conn.CloseWithError(0, "")
+		}
+	}()
 
 	stream, err := conn.AcceptStream(ctx)
 	if err != nil {
@@ -108,22 +113,26 @@ func (s Server) handleConnection(ctx context.Context, manager *Manager, conn qui
 
 	var join protocol.JoinRoom
 	if err := protocol.ReadJSON(stream, protocol.TypeJoinRoom, protocol.MaxControlSize, &join); err != nil {
-		_ = reject(stream, "invalid join request")
+		rejectAndCloseStream(stream, "invalid join request")
+		closeConn = false
 		return
 	}
 	join.Room = strings.TrimSpace(join.Room)
 	if join.Version != protocol.Version {
-		_ = reject(stream, "unsupported protocol version")
+		rejectAndCloseStream(stream, "unsupported protocol version")
+		closeConn = false
 		return
 	}
 	if join.Room == "" {
-		_ = reject(stream, "room is required")
+		rejectAndCloseStream(stream, "room is required")
+		closeConn = false
 		return
 	}
 
 	peer, err := manager.Join(join.Room)
 	if err != nil {
-		_ = reject(stream, err.Error())
+		rejectAndCloseStream(stream, err.Error())
+		closeConn = false
 		return
 	}
 	defer peer.Room.RemovePeer(peer)
@@ -187,6 +196,11 @@ func (s Server) handleConnection(ctx context.Context, manager *Manager, conn qui
 
 func reject(w io.Writer, reason string) error {
 	return protocol.WriteJSON(w, protocol.TypeJoinReject, protocol.JoinReject{Reason: reason})
+}
+
+func rejectAndCloseStream(stream quic.Stream, reason string) {
+	_ = reject(stream, reason)
+	_ = stream.Close()
 }
 
 func (s Server) tlsConfig() (*tls.Config, error) {
