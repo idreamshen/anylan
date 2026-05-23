@@ -37,7 +37,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("room is required")
 	}
 	if cfg.DeviceName == "" {
-		cfg.DeviceName = "anylan0"
+		cfg.DeviceName = tap.DefaultDeviceName()
 	}
 
 	backoff := time.Second

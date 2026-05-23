@@ -11,11 +11,14 @@ import (
 	"github.com/songgao/water"
 )
 
-type Device struct {
-	iface *water.Interface
+func DefaultDeviceName() string {
+	return "anylan0"
 }
 
 func Open(name string) (*Device, error) {
+	if name == "" {
+		name = DefaultDeviceName()
+	}
 	cfg := water.Config{
 		DeviceType: water.TAP,
 		PlatformSpecificParams: water.PlatformSpecificParams{
@@ -27,22 +30,6 @@ func Open(name string) (*Device, error) {
 		return nil, err
 	}
 	return &Device{iface: iface}, nil
-}
-
-func (d *Device) Name() string {
-	return d.iface.Name()
-}
-
-func (d *Device) Read(p []byte) (int, error) {
-	return d.iface.Read(p)
-}
-
-func (d *Device) Write(p []byte) (int, error) {
-	return d.iface.Write(p)
-}
-
-func (d *Device) Close() error {
-	return d.iface.Close()
 }
 
 func Configure(ctx context.Context, name, mac, cidr string, mtu int) error {

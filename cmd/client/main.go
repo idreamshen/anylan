@@ -10,11 +10,12 @@ import (
 	"syscall"
 
 	"github.com/idreamshen/anylan/internal/client"
+	"github.com/idreamshen/anylan/internal/tap"
 )
 
 func main() {
 	if len(os.Args) < 2 || os.Args[1] != "join" {
-		fmt.Fprintln(os.Stderr, "usage: anylan-client join --server host:4433 --room room-code [--dev anylan0]")
+		fmt.Fprintln(os.Stderr, "usage: anylan-client join --server host:4433 --room room-code [--dev tap-device]")
 		os.Exit(2)
 	}
 
@@ -22,7 +23,7 @@ func main() {
 	server := fs.String("server", "", "anylan-server address")
 	room := fs.String("room", "", "room code")
 	name := fs.String("name", "", "optional display name")
-	dev := fs.String("dev", "anylan0", "TAP device name")
+	dev := fs.String("dev", tap.DefaultDeviceName(), "TAP device name")
 	insecureSkipVerify := fs.Bool("insecure-skip-verify", false, "skip server certificate verification for local development")
 	_ = fs.Parse(os.Args[2:])
 

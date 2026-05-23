@@ -4,7 +4,8 @@
 
 The first version is intentionally small:
 
-- Linux client only.
+- Linux and Windows clients.
+- Linux server only.
 - Layer 2 TAP device.
 - Central QUIC/UDP relay server.
 - One room code equals one isolated broadcast domain.
@@ -15,6 +16,12 @@ The first version is intentionally small:
 ```bash
 go build ./cmd/client
 go build ./cmd/server
+```
+
+Cross-compile the Windows client from Linux:
+
+```bash
+GOOS=windows GOARCH=amd64 go build -o anylan-client.exe ./cmd/client
 ```
 
 ## Local Development
@@ -35,12 +42,25 @@ sudo go run ./cmd/client -- join \
   --insecure-skip-verify
 ```
 
+Join from Windows in an Administrator shell. This requires an OpenVPN
+tap-windows6 compatible TAP adapter. If `--dev` is omitted, anylan uses the
+first matching TAP adapter found by the driver; otherwise pass the adapter's
+friendly name, for example `Ethernet 3`.
+
+```powershell
+.\anylan-client.exe join `
+  --server 127.0.0.1:4433 `
+  --room my-room `
+  --dev "Ethernet 3" `
+  --insecure-skip-verify
+```
+
 For production-like use, pass `--tls-cert` and `--tls-key` to the server and omit
 `--insecure-skip-verify` on clients.
 
 ## Manual Acceptance
 
-On two Linux machines:
+On two client machines:
 
 1. Start `anylan-server` on a public UDP port.
 2. Start `anylan-client join` on both clients with the same room code.
