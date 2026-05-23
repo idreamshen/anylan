@@ -16,18 +16,22 @@ func DefaultDeviceName() string {
 }
 
 func Open(name string) (*Device, error) {
-	cfg := water.Config{
-		DeviceType: water.TAP,
-		PlatformSpecificParams: water.PlatformSpecificParams{
-			ComponentID:   "tap0901",
-			InterfaceName: name,
-		},
+	var lastErr error
+	for _, componentID := range []string{"tap0901", `root\tap0901`} {
+		cfg := water.Config{
+			DeviceType: water.TAP,
+			PlatformSpecificParams: water.PlatformSpecificParams{
+				ComponentID:   componentID,
+				InterfaceName: name,
+			},
+		}
+		iface, err := water.New(cfg)
+		if err == nil {
+			return &Device{iface: iface}, nil
+		}
+		lastErr = err
 	}
-	iface, err := water.New(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("open Windows TAP adapter failed: %w; install an OpenVPN/tap-windows6 compatible TAP driver and run anylan-client from an Administrator shell", err)
-	}
-	return &Device{iface: iface}, nil
+	return nil, fmt.Errorf("open Windows TAP adapter failed: %w; install an OpenVPN/tap-windows6 compatible TAP driver and run anylan-client from an Administrator shell", lastErr)
 }
 
 func Configure(ctx context.Context, name, _ string, cidr string, mtu int) error {

@@ -66,7 +66,8 @@ func runSession(ctx context.Context, cfg Config) error {
 	}
 
 	conn, err := quic.DialAddr(ctx, cfg.Server, tlsConfig, &quic.Config{
-		MaxIdleTimeout: 60 * time.Second,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 20 * time.Second,
 	})
 	if err != nil {
 		return err

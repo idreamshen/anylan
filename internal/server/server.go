@@ -48,7 +48,8 @@ func (s Server) ListenAndServe(ctx context.Context) error {
 		return err
 	}
 	listener, err := quic.ListenAddr(s.Addr, tlsConfig, &quic.Config{
-		MaxIdleTimeout: 60 * time.Second,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 20 * time.Second,
 	})
 	if err != nil {
 		return err
@@ -96,7 +97,8 @@ func (s Server) Listen(ctx context.Context, packetConn net.PacketConn) (*quic.Li
 		return nil, err
 	}
 	return quic.Listen(packetConn, tlsConfig, &quic.Config{
-		MaxIdleTimeout: 60 * time.Second,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 20 * time.Second,
 	})
 }
 
