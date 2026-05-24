@@ -1,75 +1,130 @@
 # anylan
 
-`anylan` is a Go MVP for a ZeroTier-like virtual LAN aimed at LAN-discovery games.
+Play LAN-only games with friends over the internet -- no port forwarding, no
+VPN accounts, no complicated setup.
 
-The first version is intentionally small:
+anylan creates a virtual local network between players. Everyone who joins the
+same **room** appears on the same LAN, so games that rely on local network
+discovery (e.g. "LAN game" lobbies) just work.
 
-- Linux and Windows clients.
-- Linux server only.
-- Layer 2 TAP device.
-- Central QUIC/UDP relay server.
-- One room code equals one isolated broadcast domain.
-- No P2P, NAT traversal, accounts, persistence, DHCP, or GUI.
+## How It Works
 
-## Build
+One person runs the **server** (or you use a shared one). Each player runs the
+**client** and joins the same room code. anylan sets up a virtual network
+adapter on each machine and bridges all traffic through the server. To the game
+it looks like everyone is on the same local network.
 
-```bash
-go build ./cmd/client
-go build ./cmd/server
+```
+  Player A ──┐                ┌── Player B
+             ├── anylan ──────┤
+  Player C ──┘   server       └── Player D
 ```
 
-Cross-compile the Windows client from Linux:
+## Quick Start
+
+### Prerequisites
+
+| | Linux | Windows |
+|---|---|---|
+| **Client** | Root privileges (for creating the virtual network adapter) | Administrator shell + [OpenVPN TAP driver](https://community.openvpn.net/openvpn/wiki/ManagingWindowsTAPDrivers) installed |
+| **Server** | Any Linux machine with a public UDP port | Not supported yet |
+
+Download pre-built binaries from the
+[Releases](https://github.com/idreamshen/anylan/releases) page, or build from
+source (requires Go 1.21+):
+
+```bash
+go build -o anylan-server ./cmd/server
+go build -o anylan-client ./cmd/client
+```
+
+Windows client cross-compile:
 
 ```bash
 GOOS=windows GOARCH=amd64 go build -o anylan-client.exe ./cmd/client
 ```
 
-## Local Development
+### 1. Start the Server
 
-Start a relay with a temporary self-signed certificate:
-
-```bash
-go run ./cmd/server --listen :4433 --insecure-dev-cert
-```
-
-Join from a Linux client:
+On a machine reachable by all players:
 
 ```bash
-sudo go run ./cmd/client -- join \
-  --server 127.0.0.1:4433 \
-  --room my-room \
-  --dev anylan0 \
-  --insecure-skip-verify
+./anylan-server --listen :4433 --tls-cert cert.pem --tls-key key.pem
 ```
 
-Join from Windows in an Administrator shell. This requires an OpenVPN
-tap-windows6 compatible TAP adapter. If `--dev` is omitted, anylan uses the
-first matching TAP adapter found by the driver; otherwise pass the adapter's
-friendly name, for example `Ethernet 3`.
+For quick testing without real TLS certificates:
+
+```bash
+./anylan-server --listen :4433 --insecure-dev-cert
+```
+
+### 2. Join a Room
+
+Pick any room name. Everyone who uses the same name ends up on the same virtual
+LAN.
+
+**Linux:**
+
+```bash
+sudo ./anylan-client join \
+  --server your-server-ip:4433 \
+  --room my-room
+```
+
+**Windows** (run as Administrator):
 
 ```powershell
 .\anylan-client.exe join `
-  --server 127.0.0.1:4433 `
-  --room my-room `
-  --dev "Ethernet 3" `
-  --insecure-skip-verify
+  --server your-server-ip:4433 `
+  --room my-room
 ```
 
-For production-like use, pass `--tls-cert` and `--tls-key` to the server and omit
-`--insecure-skip-verify` on clients.
+Each client gets a virtual IP like `10.240.x.y`. Once everyone has joined,
+launch your game and look for LAN/local games -- you should see each other.
 
-## Manual Acceptance
+### 3. Stop
 
-On two client machines:
+Press `Ctrl-C` in the client terminal to leave the room and clean up.
 
-1. Start `anylan-server` on a public UDP port.
-2. Start `anylan-client join` on both clients with the same room code.
-3. Confirm both TAP interfaces receive `10.240.x.y/24` addresses.
-4. Ping the peer virtual IP.
-5. Start a LAN-discovery game and verify room discovery or joining works.
+## Client Options
 
-## Tests
+| Flag | Default | Description |
+|---|---|---|
+| `--server` | *(required)* | Server address, e.g. `1.2.3.4:4433` |
+| `--room` | *(required)* | Room code to join |
+| `--name` | | Display name shown to other players |
+| `--dev` | `anylan0` | Virtual network adapter name (on Windows, the TAP adapter friendly name, e.g. `"Ethernet 3"`) |
+| `--insecure-skip-verify` | `false` | Skip TLS certificate check (for testing only) |
+| `--web` | | Start a local HTTP status page, e.g. `127.0.0.1:8081` |
+
+## Server Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--listen` | `:4433` | UDP listen address |
+| `--tls-cert` | | TLS certificate file |
+| `--tls-key` | | TLS private key file |
+| `--insecure-dev-cert` | `false` | Use a throwaway self-signed certificate |
+| `--pool` | `10.240.0.0/12` | IP pool for virtual addresses |
+| `--mtu` | `1300` | MTU announced to clients |
+| `--web` | | Start a local HTTP status page, e.g. `127.0.0.1:8080` |
+
+## Troubleshooting
+
+**"Permission denied" on Linux** -- The client needs root to create a TAP
+device. Run with `sudo`.
+
+**Game doesn't see other players** -- Make sure everyone is in the same room
+and that the game uses LAN/local discovery. Check that each client received an
+IP (`ip addr show anylan0` on Linux, or `ipconfig` on Windows).
+
+**Leftover network adapter after a crash** -- On Linux:
+`sudo ip link delete anylan0`
+
+## Building from Source
 
 ```bash
 go test ./...
+go build ./cmd/client
+go build ./cmd/server
 ```
