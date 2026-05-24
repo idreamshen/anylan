@@ -1,11 +1,13 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"net/netip"
 	"strings"
+	"sync"
 
 	"github.com/idreamshen/anylan/internal/protocol"
 	"github.com/idreamshen/anylan/internal/relay"
@@ -64,30 +66,82 @@ func (h Handler) handleStream(ctx context.Context, stream quic.Stream) error {
 		rejectAndCloseStream(stream, err.Error())
 		return errRejected
 	}
-	defer peer.Room.RemovePeer(peer)
 
+	// On exit: remove peer then broadcast the updated peer list to everyone
+	// still in the room.
+	defer func() {
+		peer.Room.RemovePeer(peer)
+		msg := buildPeerListMsg(peer.Room.Snapshot())
+		peer.Room.BroadcastNotify(msg, nil)
+	}()
+
+	// Build initial peer list (includes the joining peer itself).
+	roomSnap := peer.Room.Snapshot()
 	accept := protocol.JoinAccept{
-		Version: protocol.Version,
-		Room:    join.Room,
-		PeerID:  peer.ID,
-		IPv4:    peer.IP.String(),
-		CIDR:    netip.PrefixFrom(peer.IP, peer.Room.Prefix().Bits()).String(),
-		MAC:     peer.MAC.String(),
-		MTU:     h.MTU,
+		Version:       protocol.Version,
+		Room:          join.Room,
+		PeerID:        peer.ID,
+		IPv4:          peer.IP.String(),
+		CIDR:          netip.PrefixFrom(peer.IP, peer.Room.Prefix().Bits()).String(),
+		MAC:           peer.MAC.String(),
+		MTU:           h.MTU,
+		RoomCreatedAt: roomSnap.CreatedAt,
+		Peers:         toPeerInfos(roomSnap.Peers),
 	}
-	if err := protocol.WriteJSON(stream, protocol.TypeJoinAccept, accept); err != nil {
+
+	// mu serialises all writes to stream (frame goroutine + notify goroutine +
+	// main loop pong replies).
+	var mu sync.Mutex
+	lockedWrite := func(typ protocol.MessageType, payload []byte) error {
+		mu.Lock()
+		defer mu.Unlock()
+		return protocol.WriteMessage(stream, typ, payload)
+	}
+
+	if err := func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		return protocol.WriteJSON(stream, protocol.TypeJoinAccept, accept)
+	}(); err != nil {
 		return err
 	}
 
+	// Notify existing peers (everyone except the new joiner) about the updated
+	// peer list.
+	joinMsg := buildPeerListMsg(roomSnap)
+	peer.Room.BroadcastNotify(joinMsg, peer)
+
 	writeErr := make(chan error, 1)
+
+	// Goroutine: forward Ethernet frames from relay to client.
 	go func() {
 		for frame := range peer.Frames {
-			if err := protocol.WriteMessage(stream, protocol.TypeEthernetFrame, frame); err != nil {
+			if err := lockedWrite(protocol.TypeEthernetFrame, frame); err != nil {
 				writeErr <- err
 				return
 			}
 		}
 		writeErr <- nil
+	}()
+
+	// Goroutine: forward control notifications (e.g. TypePeerList) to client.
+	go func() {
+		for {
+			select {
+			case msg, ok := <-peer.Notify:
+				if !ok {
+					return
+				}
+				mu.Lock()
+				_, err := stream.Write(msg)
+				mu.Unlock()
+				if err != nil {
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
 	}()
 
 	for {
@@ -117,11 +171,36 @@ func (h Handler) handleStream(ctx context.Context, stream quic.Stream) error {
 				target.Enqueue(payload)
 			}
 		case protocol.TypePing:
-			if err := protocol.WriteMessage(stream, protocol.TypePong, payload); err != nil {
+			if err := lockedWrite(protocol.TypePong, payload); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+// toPeerInfos converts relay peer snapshots to protocol peer info structs.
+func toPeerInfos(peers []relay.PeerSnapshot) []protocol.PeerInfo {
+	out := make([]protocol.PeerInfo, 0, len(peers))
+	for _, p := range peers {
+		out = append(out, protocol.PeerInfo{
+			ID:          p.ID,
+			DisplayName: p.DisplayName,
+			IPv4:        p.IP,
+			MAC:         p.MAC,
+		})
+	}
+	return out
+}
+
+// buildPeerListMsg serialises a TypePeerList wire message from a room snapshot.
+func buildPeerListMsg(snap relay.RoomSnapshot) []byte {
+	pl := protocol.PeerList{
+		RoomCreatedAt: snap.CreatedAt,
+		Peers:         toPeerInfos(snap.Peers),
+	}
+	var buf bytes.Buffer
+	_ = protocol.WriteJSON(&buf, protocol.TypePeerList, pl)
+	return buf.Bytes()
 }
 
 func reject(w io.Writer, reason string) error {

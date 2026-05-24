@@ -99,11 +99,21 @@ function renderServer(data) {
 }
 
 function renderClient(data) {
+  const peers = data.peers || [];
+  const peerRows = peers.map(p =>
+    "<tr>" +
+      "<td>" + esc(p.display_name || p.id) + "</td>" +
+      "<td>" + esc(p.ipv4 || "-") + "</td>" +
+      "<td>" + esc(p.mac || "-") + "</td>" +
+    "</tr>"
+  ).join("");
+
   app.innerHTML =
     "<div class=\"grid\">" +
       metric("State", esc(data.state || "unknown")) +
       metric("Room", esc(data.room || "-")) +
       metric("Virtual IP", esc(data.ipv4 || "-")) +
+      metric("Peers", peers.length) +
       metric("RX rate", bytes(rate(data, ["rx_bytes"])) + "/s") +
       metric("TX rate", bytes(rate(data, ["tx_bytes"])) + "/s") +
       metric("Reconnects", data.reconnects || 0) +
@@ -112,15 +122,22 @@ function renderClient(data) {
       "<h2>Session</h2>" +
       "<div class=\"table-wrap\"><table><tbody>" +
         "<tr><th>Server</th><td>" + esc(data.server || "-") + "</td></tr>" +
-        "<tr><th>Device</th><td>" + esc(data.device || "-") + "</td></tr>" +
         "<tr><th>Peer ID</th><td>" + esc(data.peer_id || "-") + "</td></tr>" +
         "<tr><th>CIDR</th><td>" + esc(data.cidr || "-") + "</td></tr>" +
         "<tr><th>MAC</th><td>" + esc(data.mac || "-") + "</td></tr>" +
         "<tr><th>MTU</th><td>" + esc(data.mtu || "-") + "</td></tr>" +
+        "<tr><th>Room created</th><td>" + fmtTime(data.room_created_at) + "</td></tr>" +
         "<tr><th>RX total</th><td>" + bytes(data.rx_bytes || 0) + "</td></tr>" +
         "<tr><th>TX total</th><td>" + bytes(data.tx_bytes || 0) + "</td></tr>" +
         "<tr><th>Last error</th><td>" + esc(data.last_error || "") + "</td></tr>" +
       "</tbody></table></div>" +
+    "</section>" +
+    "<section>" +
+      "<h2>Peers</h2>" +
+      "<div class=\"table-wrap\"><table>" +
+        "<thead><tr><th>Name / ID</th><th>Virtual IP</th><th>MAC</th></tr></thead>" +
+        "<tbody>" + (peerRows || "<tr><td colspan=\"3\" class=\"muted\">No peers</td></tr>") + "</tbody>" +
+      "</table></div>" +
     "</section>";
 }
 

@@ -50,7 +50,10 @@ type Peer struct {
 	MAC         net.HardwareAddr
 	ConnectedAt time.Time
 	Frames      chan []byte
-	closing     sync.Once
+	// Notify carries pre-serialised wire messages (header+payload) to be
+	// forwarded to this peer's control stream (e.g. TypePeerList updates).
+	Notify  chan []byte
+	closing sync.Once
 
 	rxBytes  atomic.Uint64
 	rxFrames atomic.Uint64
@@ -217,6 +220,7 @@ func (r *Room) AddPeer(opts ...JoinOptions) (*Peer, error) {
 		MAC:         mac,
 		ConnectedAt: time.Now(),
 		Frames:      make(chan []byte, 128),
+		Notify:      make(chan []byte, 16),
 	}
 	r.peers[peer.ID] = peer
 	return peer, nil
@@ -248,6 +252,27 @@ func (r *Room) Snapshot() RoomSnapshot {
 		snapshot.Peers = append(snapshot.Peers, peer.Snapshot())
 	}
 	return snapshot
+}
+
+// BroadcastNotify sends msg to the Notify channel of every peer currently in
+// the room, skipping exclude (may be nil).  The send is non-blocking; peers
+// whose channel is full silently drop the message.
+func (r *Room) BroadcastNotify(msg []byte, exclude *Peer) {
+	r.mu.Lock()
+	peers := make([]*Peer, 0, len(r.peers))
+	for _, p := range r.peers {
+		if p != exclude {
+			peers = append(peers, p)
+		}
+	}
+	r.mu.Unlock()
+
+	for _, p := range peers {
+		select {
+		case p.Notify <- msg:
+		default:
+		}
+	}
 }
 
 func (r *Room) RemovePeer(peer *Peer) {

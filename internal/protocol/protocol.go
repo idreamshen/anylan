@@ -1,11 +1,13 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"time"
 )
 
 const (
@@ -24,6 +26,7 @@ const (
 	TypeEthernetFrame
 	TypePing
 	TypePong
+	TypePeerList
 )
 
 var (
@@ -39,17 +42,45 @@ type JoinRoom struct {
 }
 
 type JoinAccept struct {
-	Version int    `json:"version"`
-	Room    string `json:"room"`
-	PeerID  string `json:"peer_id"`
-	IPv4    string `json:"ipv4"`
-	CIDR    string `json:"cidr"`
-	MAC     string `json:"mac"`
-	MTU     int    `json:"mtu"`
+	Version       int        `json:"version"`
+	Room          string     `json:"room"`
+	PeerID        string     `json:"peer_id"`
+	IPv4          string     `json:"ipv4"`
+	CIDR          string     `json:"cidr"`
+	MAC           string     `json:"mac"`
+	MTU           int        `json:"mtu"`
+	RoomCreatedAt time.Time  `json:"room_created_at,omitempty"`
+	Peers         []PeerInfo `json:"peers,omitempty"`
 }
 
 type JoinReject struct {
 	Reason string `json:"reason"`
+}
+
+// PeerInfo carries the identifying fields of a room peer pushed to clients.
+type PeerInfo struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name,omitempty"`
+	IPv4        string `json:"ipv4"`
+	MAC         string `json:"mac"`
+}
+
+// PeerList is broadcast by the server on the control stream whenever the room
+// membership changes (peer joins or leaves).
+type PeerList struct {
+	RoomCreatedAt time.Time  `json:"room_created_at,omitempty"`
+	Peers         []PeerInfo `json:"peers"`
+}
+
+// MarshalMessage serialises typ+v into the 5-byte-header wire format and
+// returns the resulting bytes.  Useful for pre-building messages that will be
+// enqueued and written later.
+func MarshalMessage(typ MessageType, v any) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := WriteJSON(&buf, typ, v); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func WriteJSON(w io.Writer, typ MessageType, v any) error {
@@ -125,5 +156,5 @@ func ReadMessage(r io.Reader, maxPayload int) (MessageType, []byte, error) {
 }
 
 func (t MessageType) Valid() bool {
-	return t >= TypeJoinRoom && t <= TypePong
+	return t >= TypeJoinRoom && t <= TypePeerList
 }

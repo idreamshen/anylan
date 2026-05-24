@@ -157,28 +157,45 @@ func readFrame(t *testing.T, stream quic.Stream) []byte {
 	}
 	defer stream.SetReadDeadline(time.Time{})
 
-	typ, payload, err := protocol.ReadMessage(stream, protocol.MaxFrameSize)
-	if err != nil {
-		t.Fatalf("read frame failed: %v", err)
+	for {
+		typ, payload, err := protocol.ReadMessage(stream, protocol.MaxControlSize)
+		if err != nil {
+			t.Fatalf("read frame failed: %v", err)
+		}
+		if typ == protocol.TypePeerList {
+			// skip peer-list notifications; keep waiting for an ethernet frame
+			continue
+		}
+		if typ != protocol.TypeEthernetFrame {
+			t.Fatalf("type = %d, want ethernet frame", typ)
+		}
+		return payload
 	}
-	if typ != protocol.TypeEthernetFrame {
-		t.Fatalf("type = %d, want ethernet frame", typ)
-	}
-	return payload
 }
 
 func assertNoFrame(t *testing.T, stream quic.Stream) {
 	t.Helper()
-	if err := stream.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
-		t.Fatalf("set deadline failed: %v", err)
-	}
-	defer stream.SetReadDeadline(time.Time{})
 
-	_, _, err := protocol.ReadMessage(stream, protocol.MaxFrameSize)
-	if ne, ok := err.(net.Error); ok && ne.Timeout() {
-		return
+	for {
+		if err := stream.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+			t.Fatalf("set deadline failed: %v", err)
+		}
+		typ, _, err := protocol.ReadMessage(stream, protocol.MaxControlSize)
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			stream.SetReadDeadline(time.Time{})
+			return
+		}
+		if err != nil {
+			stream.SetReadDeadline(time.Time{})
+			t.Fatalf("unexpected read result: %v", err)
+		}
+		if typ == protocol.TypePeerList {
+			// peer-list notifications are expected; not an ethernet frame, keep waiting
+			continue
+		}
+		stream.SetReadDeadline(time.Time{})
+		t.Fatalf("unexpected ethernet frame received")
 	}
-	t.Fatalf("unexpected read result: %v", err)
 }
 
 func testTLSConfig() *tls.Config {

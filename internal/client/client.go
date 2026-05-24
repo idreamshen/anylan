@@ -163,17 +163,18 @@ type Status struct {
 
 	server    string
 	room      string
-	device    string
 	state     string
 	lastError string
 
-	peerID    string
-	ipv4      string
-	cidr      string
-	mac       string
-	mtu       int
-	joinedAt  time.Time
-	updatedAt time.Time
+	peerID        string
+	ipv4          string
+	cidr          string
+	mac           string
+	mtu           int
+	joinedAt      time.Time
+	updatedAt     time.Time
+	roomCreatedAt time.Time
+	peers         []protocol.PeerInfo
 
 	rxBytes    atomic.Uint64
 	rxFrames   atomic.Uint64
@@ -183,30 +184,30 @@ type Status struct {
 }
 
 type Snapshot struct {
-	GeneratedAt time.Time `json:"generated_at"`
-	Server      string    `json:"server"`
-	Room        string    `json:"room"`
-	Device      string    `json:"device"`
-	State       string    `json:"state"`
-	LastError   string    `json:"last_error,omitempty"`
-	PeerID      string    `json:"peer_id,omitempty"`
-	IPv4        string    `json:"ipv4,omitempty"`
-	CIDR        string    `json:"cidr,omitempty"`
-	MAC         string    `json:"mac,omitempty"`
-	MTU         int       `json:"mtu,omitempty"`
-	JoinedAt    time.Time `json:"joined_at,omitempty"`
-	RxBytes     uint64    `json:"rx_bytes"`
-	RxFrames    uint64    `json:"rx_frames"`
-	TxBytes     uint64    `json:"tx_bytes"`
-	TxFrames    uint64    `json:"tx_frames"`
-	Reconnects  uint64    `json:"reconnects"`
+	GeneratedAt   time.Time          `json:"generated_at"`
+	Server        string             `json:"server"`
+	Room          string             `json:"room"`
+	State         string             `json:"state"`
+	LastError     string             `json:"last_error,omitempty"`
+	PeerID        string             `json:"peer_id,omitempty"`
+	IPv4          string             `json:"ipv4,omitempty"`
+	CIDR          string             `json:"cidr,omitempty"`
+	MAC           string             `json:"mac,omitempty"`
+	MTU           int                `json:"mtu,omitempty"`
+	JoinedAt      time.Time          `json:"joined_at,omitempty"`
+	RoomCreatedAt time.Time          `json:"room_created_at,omitempty"`
+	Peers         []protocol.PeerInfo `json:"peers,omitempty"`
+	RxBytes       uint64             `json:"rx_bytes"`
+	RxFrames      uint64             `json:"rx_frames"`
+	TxBytes       uint64             `json:"tx_bytes"`
+	TxFrames      uint64             `json:"tx_frames"`
+	Reconnects    uint64             `json:"reconnects"`
 }
 
 func newStatus(cfg Config) *Status {
 	return &Status{
 		server:    cfg.Server,
 		room:      cfg.Room,
-		device:    cfg.DeviceName,
 		state:     "starting",
 		updatedAt: time.Now(),
 	}
@@ -229,8 +230,17 @@ func (s *Status) joined(accept protocol.JoinAccept) {
 	s.cidr = accept.CIDR
 	s.mac = accept.MAC
 	s.mtu = accept.MTU
+	s.roomCreatedAt = accept.RoomCreatedAt
+	s.peers = accept.Peers
 	s.joinedAt = time.Now()
 	s.updatedAt = s.joinedAt
+}
+
+func (s *Status) updatePeers(pl protocol.PeerList) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.roomCreatedAt = pl.RoomCreatedAt
+	s.peers = pl.Peers
 }
 
 func (s *Status) endSession(err error) {
@@ -240,6 +250,7 @@ func (s *Status) endSession(err error) {
 	if err != nil {
 		s.lastError = err.Error()
 	}
+	s.peers = nil
 	s.updatedAt = time.Now()
 }
 
@@ -257,23 +268,24 @@ func (s *Status) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return Snapshot{
-		GeneratedAt: time.Now(),
-		Server:      s.server,
-		Room:        s.room,
-		Device:      s.device,
-		State:       s.state,
-		LastError:   s.lastError,
-		PeerID:      s.peerID,
-		IPv4:        s.ipv4,
-		CIDR:        s.cidr,
-		MAC:         s.mac,
-		MTU:         s.mtu,
-		JoinedAt:    s.joinedAt,
-		RxBytes:     s.rxBytes.Load(),
-		RxFrames:    s.rxFrames.Load(),
-		TxBytes:     s.txBytes.Load(),
-		TxFrames:    s.txFrames.Load(),
-		Reconnects:  s.reconnects.Load(),
+		GeneratedAt:   time.Now(),
+		Server:        s.server,
+		Room:          s.room,
+		State:         s.state,
+		LastError:     s.lastError,
+		PeerID:        s.peerID,
+		IPv4:          s.ipv4,
+		CIDR:          s.cidr,
+		MAC:           s.mac,
+		MTU:           s.mtu,
+		JoinedAt:      s.joinedAt,
+		RoomCreatedAt: s.roomCreatedAt,
+		Peers:         s.peers,
+		RxBytes:       s.rxBytes.Load(),
+		RxFrames:      s.rxFrames.Load(),
+		TxBytes:       s.txBytes.Load(),
+		TxFrames:      s.txFrames.Load(),
+		Reconnects:    s.reconnects.Load(),
 	}
 }
 
@@ -299,7 +311,10 @@ func readTAP(device io.Reader, stream io.Writer, status *Status, errCh chan<- er
 
 func writeTAP(device io.Writer, stream io.Reader, status *Status, errCh chan<- error) {
 	for {
-		typ, payload, err := protocol.ReadMessage(stream, protocol.MaxFrameSize)
+		// Use MaxControlSize so TypePeerList messages (which can exceed
+		// MaxFrameSize) are not rejected; TypeEthernetFrame size is still
+		// independently enforced inside ReadMessage.
+		typ, payload, err := protocol.ReadMessage(stream, protocol.MaxControlSize)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				errCh <- err
@@ -308,14 +323,19 @@ func writeTAP(device io.Writer, stream io.Reader, status *Status, errCh chan<- e
 			errCh <- err
 			return
 		}
-		if typ != protocol.TypeEthernetFrame {
-			continue
+		switch typ {
+		case protocol.TypeEthernetFrame:
+			if _, err := device.Write(payload); err != nil {
+				errCh <- err
+				return
+			}
+			status.recordRx(len(payload))
+		case protocol.TypePeerList:
+			var pl protocol.PeerList
+			if err := json.Unmarshal(payload, &pl); err == nil {
+				status.updatePeers(pl)
+			}
 		}
-		if _, err := device.Write(payload); err != nil {
-			errCh <- err
-			return
-		}
-		status.recordRx(len(payload))
 	}
 }
 
