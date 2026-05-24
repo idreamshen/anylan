@@ -34,14 +34,13 @@ Download pre-built binaries from the
 source (requires Go 1.21+):
 
 ```bash
-go build -o anylan-server ./cmd/server
-go build -o anylan-client ./cmd/client
+make build
 ```
 
 Windows client cross-compile:
 
 ```bash
-GOOS=windows GOARCH=amd64 go build -o anylan-client.exe ./cmd/client
+make build-windows
 ```
 
 ### 1. Start the Server
@@ -49,13 +48,13 @@ GOOS=windows GOARCH=amd64 go build -o anylan-client.exe ./cmd/client
 On a machine reachable by all players:
 
 ```bash
-./anylan-server --listen :4433 --tls-cert cert.pem --tls-key key.pem
+./out/anylan-server --listen :4433 --tls-cert cert.pem --tls-key key.pem
 ```
 
 For quick testing without real TLS certificates:
 
 ```bash
-./anylan-server --listen :4433 --insecure-dev-cert --web 0.0.0.0:8080
+./out/anylan-server --listen :4433 --insecure-dev-cert --web 0.0.0.0:8080
 ```
 
 The `--web` flag is optional but recommended: it exposes a status page at the
@@ -69,7 +68,7 @@ LAN.
 **Linux:**
 
 ```bash
-sudo ./anylan-client join \
+sudo ./out/anylan-client join \
   --server your-server-ip:4433 \
   --room my-room
 ```
@@ -77,7 +76,7 @@ sudo ./anylan-client join \
 **Windows** (run as Administrator):
 
 ```powershell
-.\anylan-client.exe join `
+.\out\anylan-client.exe join `
   --server your-server-ip:4433 `
   --room my-room
 ```
@@ -137,6 +136,6 @@ Or directly with Go:
 
 ```bash
 go test ./...
-go build ./cmd/client
-go build ./cmd/server
+go build -o out/anylan-client ./cmd/client
+go build -o out/anylan-server ./cmd/server
 ```
