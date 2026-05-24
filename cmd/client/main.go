@@ -22,10 +22,12 @@ func main() {
 	fs := flag.NewFlagSet("join", flag.ExitOnError)
 	server := fs.String("server", "", "anylan-server address")
 	room := fs.String("room", "", "room code")
+	roomKey := fs.String("room-key", "", "optional room access key")
 	name := fs.String("name", "", "optional display name")
 	dev := fs.String("dev", tap.DefaultDeviceName(), "TAP device name")
-	insecureSkipVerify := fs.Bool("insecure-skip-verify", true, "skip server certificate verification for local development")
-	web := fs.String("web", "0.0.0.0:8081", "HTTP status listen address")
+	insecureSkipVerify := fs.Bool("insecure-skip-verify", false, "skip server certificate verification for local development")
+	web := fs.String("web", "", "HTTP status listen address")
+	webToken := fs.String("web-token", "", "bearer token required for the HTTP status page")
 	_ = fs.Parse(os.Args[2:])
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -34,10 +36,12 @@ func main() {
 	cfg := client.Config{
 		Server:             *server,
 		Room:               *room,
+		RoomKey:            *roomKey,
 		DisplayName:        *name,
 		DeviceName:         *dev,
 		InsecureSkipVerify: *insecureSkipVerify,
 		WebAddr:            *web,
+		WebToken:           *webToken,
 	}
 	if err := client.Run(ctx, cfg); err != nil && ctx.Err() == nil {
 		log.Fatal(err)

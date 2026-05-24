@@ -37,6 +37,7 @@ var (
 type JoinRoom struct {
 	Version     int    `json:"version"`
 	Room        string `json:"room"`
+	RoomKey     string `json:"room_key,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
 	Nonce       string `json:"nonce,omitempty"`
 }

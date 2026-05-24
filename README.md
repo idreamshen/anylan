@@ -54,11 +54,12 @@ On a machine reachable by all players:
 For quick testing without real TLS certificates:
 
 ```bash
-./out/anylan-server --listen :4433 --insecure-dev-cert --web 0.0.0.0:8080
+./out/anylan-server --listen :4433 --insecure-dev-cert --web 127.0.0.1:8080
 ```
 
 The `--web` flag is optional but recommended: it exposes a status page at the
-given address where you can see connected rooms and peers.
+given address where you can see connected rooms and peers. Use `--web-token` if
+the status page is reachable by anyone else.
 
 ### 2. Join a Room
 
@@ -72,6 +73,9 @@ sudo ./out/anylan-client join \
   --server your-server-ip:4433 \
   --room my-room
 ```
+
+For a server started with `--room-key`, clients must pass the same
+`--room-key` value when joining.
 
 **Windows** (run as Administrator):
 
@@ -94,22 +98,26 @@ Press `Ctrl-C` in the client terminal to leave the room and clean up.
 |---|---|---|
 | `--server` | *(required)* | Server address, e.g. `1.2.3.4:4433` |
 | `--room` | *(required)* | Room code to join |
+| `--room-key` | | Optional room access key required by the server |
 | `--name` | | Display name shown to other players |
 | `--dev` | `anylan0` | Virtual network adapter name (on Windows, the TAP adapter friendly name, e.g. `"Ethernet 3"`) |
 | `--insecure-skip-verify` | `false` | Skip TLS certificate check (for testing only) |
 | `--web` | | Start a local HTTP status page, e.g. `127.0.0.1:8081` |
+| `--web-token` | | Bearer token required for the HTTP status page |
 
 ## Server Options
 
 | Flag | Default | Description |
 |---|---|---|
 | `--listen` | `:4433` | UDP listen address |
+| `--room-key` | | Optional room access key required from clients |
 | `--tls-cert` | | TLS certificate file |
 | `--tls-key` | | TLS private key file |
 | `--insecure-dev-cert` | `false` | Use a throwaway self-signed certificate |
 | `--pool` | `10.240.0.0/12` | IP pool for virtual addresses |
 | `--mtu` | `1300` | MTU announced to clients |
 | `--web` | | Start a local HTTP status page, e.g. `127.0.0.1:8080` |
+| `--web-token` | | Bearer token required for the HTTP status page |
 
 ## Troubleshooting
 

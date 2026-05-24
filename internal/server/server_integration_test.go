@@ -40,33 +40,33 @@ func TestServerRelaysFramesWithinRoomOnly(t *testing.T) {
 	other := joinTestClient(t, ctx, listener.Addr().String(), "other")
 	defer other.close()
 
-	aMAC := mac("02:00:00:00:00:0a")
-	bMAC := mac("02:00:00:00:00:0b")
+	aMAC := mac(a.accept.MAC)
+	bMAC := mac(b.accept.MAC)
 	broadcast := ethernetFrame(broadcastMAC(), aMAC)
-	if err := protocol.WriteMessage(a.stream, protocol.TypeEthernetFrame, broadcast); err != nil {
+	if err := protocol.WriteMessage(a.data, protocol.TypeEthernetFrame, broadcast); err != nil {
 		t.Fatalf("write frame failed: %v", err)
 	}
 
-	got := readFrame(t, b.stream)
+	got := readFrame(t, b.data)
 	if string(got) != string(broadcast) {
 		t.Fatal("same-room peer received different frame")
 	}
-	got = readFrame(t, c.stream)
+	got = readFrame(t, c.data)
 	if string(got) != string(broadcast) {
 		t.Fatal("second same-room peer received different frame")
 	}
-	assertNoFrame(t, other.stream)
+	assertNoFrame(t, other.data)
 
 	unicast := ethernetFrame(aMAC, bMAC)
-	if err := protocol.WriteMessage(b.stream, protocol.TypeEthernetFrame, unicast); err != nil {
+	if err := protocol.WriteMessage(b.data, protocol.TypeEthernetFrame, unicast); err != nil {
 		t.Fatalf("write unicast failed: %v", err)
 	}
-	got = readFrame(t, a.stream)
+	got = readFrame(t, a.data)
 	if string(got) != string(unicast) {
 		t.Fatal("known unicast recipient received different frame")
 	}
-	assertNoFrame(t, c.stream)
-	assertNoFrame(t, other.stream)
+	assertNoFrame(t, c.data)
+	assertNoFrame(t, other.data)
 }
 
 func TestServerRejectsDifferentProtocolVersion(t *testing.T) {
@@ -121,9 +121,12 @@ func TestServerRejectsDifferentProtocolVersion(t *testing.T) {
 type testClient struct {
 	conn   quic.Connection
 	stream quic.Stream
+	data   quic.Stream
+	accept protocol.JoinAccept
 }
 
 func (c testClient) close() {
+	c.data.Close()
 	c.stream.Close()
 	c.conn.CloseWithError(0, "")
 }
@@ -146,7 +149,11 @@ func joinTestClient(t *testing.T, ctx context.Context, addr, room string) testCl
 	if err := protocol.ReadJSON(stream, protocol.TypeJoinAccept, protocol.MaxControlSize, &accept); err != nil {
 		t.Fatalf("read accept failed: %v", err)
 	}
-	return testClient{conn: conn, stream: stream}
+	data, err := conn.AcceptStream(ctx)
+	if err != nil {
+		t.Fatalf("open data stream failed: %v", err)
+	}
+	return testClient{conn: conn, stream: stream, data: data, accept: accept}
 }
 
 func readFrame(t *testing.T, stream quic.Stream) []byte {
@@ -162,8 +169,8 @@ func readFrame(t *testing.T, stream quic.Stream) []byte {
 		if err != nil {
 			t.Fatalf("read frame failed: %v", err)
 		}
-		if typ == protocol.TypePeerList {
-			// skip peer-list notifications; keep waiting for an ethernet frame
+		if typ == protocol.TypePeerList || typ == protocol.TypePing {
+			// skip control/ready messages; keep waiting for an ethernet frame
 			continue
 		}
 		if typ != protocol.TypeEthernetFrame {
@@ -189,8 +196,8 @@ func assertNoFrame(t *testing.T, stream quic.Stream) {
 			stream.SetReadDeadline(time.Time{})
 			t.Fatalf("unexpected read result: %v", err)
 		}
-		if typ == protocol.TypePeerList {
-			// peer-list notifications are expected; not an ethernet frame, keep waiting
+		if typ == protocol.TypePeerList || typ == protocol.TypePing {
+			// control/ready messages are expected; not an ethernet frame, keep waiting
 			continue
 		}
 		stream.SetReadDeadline(time.Time{})

@@ -56,14 +56,14 @@ func TestForwardFloodsBroadcastAndLearnsSource(t *testing.T) {
 	b, _ := manager.Join("room")
 	c, _ := manager.Join("room")
 
-	frame := ethernetFrame(broadcastMAC(), mac("02:00:00:00:00:0a"))
+	frame := ethernetFrame(broadcastMAC(), a.MAC)
 	targets, err := a.Room.Forward(a, frame)
 	if err != nil {
 		t.Fatalf("forward failed: %v", err)
 	}
 	assertTargets(t, targets, b, c)
 
-	if got := a.Room.macToPeer[string(mac("02:00:00:00:00:0a"))]; got != a {
+	if got := a.Room.macToPeer[string(a.MAC)]; got != a {
 		t.Fatal("source MAC was not learned")
 	}
 }
@@ -74,13 +74,11 @@ func TestForwardUnicastsKnownDestination(t *testing.T) {
 	b, _ := manager.Join("room")
 	c, _ := manager.Join("room")
 
-	bMAC := mac("02:00:00:00:00:0b")
-	aMAC := mac("02:00:00:00:00:0a")
-	if _, err := b.Room.Forward(b, ethernetFrame(broadcastMAC(), bMAC)); err != nil {
+	if _, err := b.Room.Forward(b, ethernetFrame(broadcastMAC(), b.MAC)); err != nil {
 		t.Fatalf("learn b failed: %v", err)
 	}
 
-	targets, err := a.Room.Forward(a, ethernetFrame(bMAC, aMAC))
+	targets, err := a.Room.Forward(a, ethernetFrame(b.MAC, a.MAC))
 	if err != nil {
 		t.Fatalf("forward failed: %v", err)
 	}
@@ -93,15 +91,23 @@ func TestForwardUnicastsKnownDestination(t *testing.T) {
 func TestRemovePeerRemovesMACTableEntries(t *testing.T) {
 	manager := NewManager(netip.MustParsePrefix("10.240.0.0/12"))
 	a, _ := manager.Join("room")
-	learned := mac("02:00:00:00:00:0a")
-
-	if _, err := a.Room.Forward(a, ethernetFrame(broadcastMAC(), learned)); err != nil {
+	if _, err := a.Room.Forward(a, ethernetFrame(broadcastMAC(), a.MAC)); err != nil {
 		t.Fatalf("learn failed: %v", err)
 	}
 	a.Room.RemovePeer(a)
 
-	if got := a.Room.macToPeer[string(learned)]; got != nil {
+	if got := a.Room.macToPeer[string(a.MAC)]; got != nil {
 		t.Fatal("MAC entry survived peer removal")
+	}
+}
+
+func TestForwardRejectsSpoofedSourceMAC(t *testing.T) {
+	manager := NewManager(netip.MustParsePrefix("10.240.0.0/12"))
+	a, _ := manager.Join("room")
+
+	frame := ethernetFrame(broadcastMAC(), mac("02:00:00:00:00:0a"))
+	if _, err := a.Room.Forward(a, frame); !errors.Is(err, ErrSourceMACInvalid) {
+		t.Fatalf("error = %v, want %v", err, ErrSourceMACInvalid)
 	}
 }
 
@@ -196,6 +202,62 @@ func TestManagerSnapshotIncludesPeerMetadataAndCounters(t *testing.T) {
 	}
 	if got.TxBytes != 4 || got.TxFrames != 1 {
 		t.Fatalf("tx counters = %d/%d, want 4/1", got.TxBytes, got.TxFrames)
+	}
+	peer.RecordDropFrame(7)
+	got = manager.Snapshot().Rooms[0].Peers[0]
+	if got.DropBytes != 7 || got.DropFrames != 1 {
+		t.Fatalf("drop counters = %d/%d, want 7/1", got.DropBytes, got.DropFrames)
+	}
+}
+
+func TestRemoveLastPeerDeletesRoomAndReusesPrefix(t *testing.T) {
+	manager := NewManager(netip.MustParsePrefix("10.240.0.0/24"))
+	peer, err := manager.Join("room-a")
+	if err != nil {
+		t.Fatalf("join room-a failed: %v", err)
+	}
+	prefix := peer.Room.Prefix()
+	peer.Room.RemovePeer(peer)
+	if _, ok := manager.Room("room-a"); ok {
+		t.Fatal("empty room was not deleted")
+	}
+
+	peer, err = manager.Join("room-b")
+	if err != nil {
+		t.Fatalf("join room-b failed after room-a cleanup: %v", err)
+	}
+	if peer.Room.Prefix() != prefix {
+		t.Fatalf("prefix = %s, want reused %s", peer.Room.Prefix(), prefix)
+	}
+}
+
+func TestRoomReusesReleasedHost(t *testing.T) {
+	manager := NewManager(netip.MustParsePrefix("10.240.0.0/12"))
+	a, _ := manager.Join("room")
+	b, _ := manager.Join("room")
+	released := a.IP
+	a.Room.RemovePeer(a)
+
+	c, err := manager.Join("room")
+	if err != nil {
+		t.Fatalf("join after release failed: %v", err)
+	}
+	if c.IP != released {
+		t.Fatalf("reused IP = %s, want %s", c.IP, released)
+	}
+	if c.IP == b.IP {
+		t.Fatalf("reused active peer IP %s", c.IP)
+	}
+}
+
+func TestPeerRateLimit(t *testing.T) {
+	manager := NewManager(netip.MustParsePrefix("10.240.0.0/12"))
+	peer, _ := manager.Join("room")
+	if !peer.AllowFrame(maxPeerBytes) {
+		t.Fatal("first frame should be allowed")
+	}
+	if peer.AllowFrame(1) {
+		t.Fatal("frame over byte limit was allowed")
 	}
 }
 

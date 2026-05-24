@@ -28,11 +28,13 @@ const alpn = "anylan-mvp"
 type Server struct {
 	Addr            string
 	Pool            netip.Prefix
+	RoomKey         string
 	TLSCertFile     string
 	TLSKeyFile      string
 	InsecureDevCert bool
 	MTU             int
 	WebAddr         string
+	WebToken        string
 }
 
 func (s Server) ListenAndServe(ctx context.Context) error {
@@ -74,12 +76,14 @@ func (s Server) Serve(ctx context.Context, listener *quic.Listener) error {
 	handler := control.Handler{
 		Manager: manager,
 		MTU:     s.MTU,
+		RoomKey: s.RoomKey,
 	}
 	if s.WebAddr != "" {
 		go func() {
 			err := webui.Server{
 				Addr:     s.WebAddr,
 				Title:    "anylan server",
+				Token:    s.WebToken,
 				Snapshot: func() any { return manager.Snapshot() },
 			}.ListenAndServe(ctx)
 			if err != nil && ctx.Err() == nil {

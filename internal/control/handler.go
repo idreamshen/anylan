@@ -19,6 +19,7 @@ var errRejected = errors.New("join rejected")
 type Handler struct {
 	Manager *relay.Manager
 	MTU     int
+	RoomKey string
 }
 
 func (h Handler) HandleConnection(ctx context.Context, conn quic.Connection) {
@@ -38,24 +39,28 @@ func (h Handler) HandleConnection(ctx context.Context, conn quic.Connection) {
 	if h.MTU == 0 {
 		h.MTU = protocol.DefaultMTU
 	}
-	if err := h.handleStream(ctx, stream); errors.Is(err, errRejected) {
+	if err := h.handleStream(ctx, conn, stream); errors.Is(err, errRejected) {
 		closeConn = false
 	}
 }
 
-func (h Handler) handleStream(ctx context.Context, stream quic.Stream) error {
+func (h Handler) handleStream(ctx context.Context, conn quic.Connection, controlStream quic.Stream) error {
 	var join protocol.JoinRoom
-	if err := protocol.ReadJSON(stream, protocol.TypeJoinRoom, protocol.MaxControlSize, &join); err != nil {
-		rejectAndCloseStream(stream, "invalid join request")
+	if err := protocol.ReadJSON(controlStream, protocol.TypeJoinRoom, protocol.MaxControlSize, &join); err != nil {
+		rejectAndCloseStream(controlStream, "invalid join request")
 		return errRejected
 	}
 	join.Room = strings.TrimSpace(join.Room)
 	if join.Version != protocol.Version {
-		rejectAndCloseStream(stream, "unsupported protocol version")
+		rejectAndCloseStream(controlStream, "unsupported protocol version")
 		return errRejected
 	}
 	if join.Room == "" {
-		rejectAndCloseStream(stream, "room is required")
+		rejectAndCloseStream(controlStream, "room is required")
+		return errRejected
+	}
+	if h.RoomKey != "" && join.RoomKey != h.RoomKey {
+		rejectAndCloseStream(controlStream, "invalid room key")
 		return errRejected
 	}
 
@@ -63,16 +68,19 @@ func (h Handler) handleStream(ctx context.Context, stream quic.Stream) error {
 		DisplayName: join.DisplayName,
 	})
 	if err != nil {
-		rejectAndCloseStream(stream, err.Error())
+		rejectAndCloseStream(controlStream, err.Error())
 		return errRejected
 	}
 
 	// On exit: remove peer then broadcast the updated peer list to everyone
 	// still in the room.
 	defer func() {
+		room := peer.Room
 		peer.Room.RemovePeer(peer)
-		msg := buildPeerListMsg(peer.Room.Snapshot())
-		peer.Room.BroadcastNotify(msg, nil)
+		if room.PeerCount() > 0 {
+			msg := buildPeerListMsg(room.Snapshot())
+			room.BroadcastNotify(msg, nil)
+		}
 	}()
 
 	// Build initial peer list (includes the joining peer itself).
@@ -89,20 +97,29 @@ func (h Handler) handleStream(ctx context.Context, stream quic.Stream) error {
 		Peers:         toPeerInfos(roomSnap.Peers),
 	}
 
-	// mu serialises all writes to stream (frame goroutine + notify goroutine +
-	// main loop pong replies).
-	var mu sync.Mutex
-	lockedWrite := func(typ protocol.MessageType, payload []byte) error {
-		mu.Lock()
-		defer mu.Unlock()
-		return protocol.WriteMessage(stream, typ, payload)
+	// controlMu serialises all writes to the control stream (notify goroutine +
+	// main loop pong replies). Ethernet frames use a dedicated data stream.
+	var controlMu sync.Mutex
+	lockedControlWrite := func(typ protocol.MessageType, payload []byte) error {
+		controlMu.Lock()
+		defer controlMu.Unlock()
+		return protocol.WriteMessage(controlStream, typ, payload)
 	}
 
 	if err := func() error {
-		mu.Lock()
-		defer mu.Unlock()
-		return protocol.WriteJSON(stream, protocol.TypeJoinAccept, accept)
+		controlMu.Lock()
+		defer controlMu.Unlock()
+		return protocol.WriteJSON(controlStream, protocol.TypeJoinAccept, accept)
 	}(); err != nil {
+		return err
+	}
+
+	dataStream, err := conn.OpenStreamSync(ctx)
+	if err != nil {
+		return err
+	}
+	defer dataStream.Close()
+	if err := protocol.WriteMessage(dataStream, protocol.TypePing, nil); err != nil {
 		return err
 	}
 
@@ -116,7 +133,7 @@ func (h Handler) handleStream(ctx context.Context, stream quic.Stream) error {
 	// Goroutine: forward Ethernet frames from relay to client.
 	go func() {
 		for frame := range peer.Frames {
-			if err := lockedWrite(protocol.TypeEthernetFrame, frame); err != nil {
+			if err := protocol.WriteMessage(dataStream, protocol.TypeEthernetFrame, frame); err != nil {
 				writeErr <- err
 				return
 			}
@@ -132,9 +149,9 @@ func (h Handler) handleStream(ctx context.Context, stream quic.Stream) error {
 				if !ok {
 					return
 				}
-				mu.Lock()
-				_, err := stream.Write(msg)
-				mu.Unlock()
+				controlMu.Lock()
+				_, err := controlStream.Write(msg)
+				controlMu.Unlock()
 				if err != nil {
 					return
 				}
@@ -153,7 +170,7 @@ func (h Handler) handleStream(ctx context.Context, stream quic.Stream) error {
 		default:
 		}
 
-		typ, payload, err := protocol.ReadMessage(stream, protocol.MaxFrameSize)
+		typ, payload, err := protocol.ReadMessage(dataStream, protocol.MaxFrameSize)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
@@ -162,16 +179,21 @@ func (h Handler) handleStream(ctx context.Context, stream quic.Stream) error {
 		}
 		switch typ {
 		case protocol.TypeEthernetFrame:
+			if !peer.AllowFrame(len(payload)) {
+				peer.RecordDropFrame(len(payload))
+				continue
+			}
 			peer.RecordRxFrame(len(payload))
 			targets, err := peer.Room.Forward(peer, payload)
 			if err != nil {
+				peer.RecordDropFrame(len(payload))
 				continue
 			}
 			for _, target := range targets {
 				target.Enqueue(payload)
 			}
 		case protocol.TypePing:
-			if err := lockedWrite(protocol.TypePong, payload); err != nil {
+			if err := lockedControlWrite(protocol.TypePong, payload); err != nil {
 				return err
 			}
 		}

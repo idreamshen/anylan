@@ -43,3 +43,25 @@ func TestHandlersServeIndexAndStatus(t *testing.T) {
 		t.Fatalf("state = %q", body["state"])
 	}
 }
+
+func TestAuthMiddlewareRequiresBearerToken(t *testing.T) {
+	server := Server{Token: "secret"}
+	handler := server.withAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec = httptest.NewRecorder()
+	handler(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("authenticated status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+}

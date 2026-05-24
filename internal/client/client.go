@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -26,10 +27,12 @@ const alpn = "anylan-mvp"
 type Config struct {
 	Server             string
 	Room               string
+	RoomKey            string
 	DisplayName        string
 	DeviceName         string
 	InsecureSkipVerify bool
 	WebAddr            string
+	WebToken           string
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -50,6 +53,7 @@ func Run(ctx context.Context, cfg Config) error {
 			err := webui.Server{
 				Addr:     cfg.WebAddr,
 				Title:    "anylan client",
+				Token:    cfg.WebToken,
 				Snapshot: func() any { return status.Snapshot() },
 			}.ListenAndServe(ctx)
 			if err != nil && ctx.Err() == nil {
@@ -65,7 +69,11 @@ func Run(ctx context.Context, cfg Config) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		status.endSession(err)
+		if isFatal(err) {
+			status.endSession(err, "stopped")
+			return err
+		}
+		status.endSession(err, "reconnecting")
 		log.Printf("session ended: %v; reconnecting in %s", err, backoff)
 		select {
 		case <-ctx.Done():
@@ -91,15 +99,20 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 		KeepAlivePeriod: 20 * time.Second,
 	})
 	if err != nil {
+		var certErr *tls.CertificateVerificationError
+		var unknownAuthority x509.UnknownAuthorityError
+		if errors.As(err, &certErr) || errors.As(err, &unknownAuthority) {
+			return fatalf("TLS certificate verification failed: %w", err)
+		}
 		return err
 	}
 	defer conn.CloseWithError(0, "")
 
-	stream, err := conn.OpenStreamSync(ctx)
+	controlStream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
 		return err
 	}
-	defer stream.Close()
+	defer controlStream.Close()
 
 	nonce, err := nonceHex()
 	if err != nil {
@@ -108,47 +121,55 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 	join := protocol.JoinRoom{
 		Version:     protocol.Version,
 		Room:        cfg.Room,
+		RoomKey:     cfg.RoomKey,
 		DisplayName: cfg.DisplayName,
 		Nonce:       nonce,
 	}
-	if err := protocol.WriteJSON(stream, protocol.TypeJoinRoom, join); err != nil {
+	if err := protocol.WriteJSON(controlStream, protocol.TypeJoinRoom, join); err != nil {
 		return err
 	}
 
-	typ, payload, err := protocol.ReadMessage(stream, protocol.MaxControlSize)
+	typ, payload, err := protocol.ReadMessage(controlStream, protocol.MaxControlSize)
 	if err != nil {
 		return err
 	}
 	if typ == protocol.TypeJoinReject {
 		var reject protocol.JoinReject
 		if err := decodeJSON(payload, &reject); err != nil {
-			return err
+			return fatalf("decode join reject: %w", err)
 		}
-		return fmt.Errorf("join rejected: %s", reject.Reason)
+		return fatalf("join rejected: %s", reject.Reason)
 	}
 	if typ != protocol.TypeJoinAccept {
-		return fmt.Errorf("unexpected join response type %d", typ)
+		return fatalf("unexpected join response type %d", typ)
 	}
 	var accept protocol.JoinAccept
 	if err := decodeJSON(payload, &accept); err != nil {
-		return err
+		return fatalf("decode join accept: %w", err)
 	}
 	status.joined(accept)
 
 	device, err := tap.Open(cfg.DeviceName)
 	if err != nil {
-		return err
+		return fatalf("open TAP device: %w", err)
 	}
 	defer device.Close()
 
 	if err := tap.Configure(ctx, device.Name(), accept.MAC, accept.CIDR, accept.MTU); err != nil {
-		return err
+		return fatalf("configure TAP device: %w", err)
 	}
 	log.Printf("joined room %q as peer %s on %s (%s, %s)", accept.Room, accept.PeerID, device.Name(), accept.CIDR, accept.MAC)
 
-	errCh := make(chan error, 2)
-	go readTAP(device, stream, status, errCh)
-	go writeTAP(device, stream, status, errCh)
+	dataStream, err := conn.AcceptStream(ctx)
+	if err != nil {
+		return err
+	}
+	defer dataStream.Close()
+
+	errCh := make(chan error, 3)
+	go readTAP(device, dataStream, status, errCh)
+	go writeTAP(device, dataStream, status, errCh)
+	go readControl(controlStream, status, errCh)
 
 	select {
 	case <-ctx.Done():
@@ -184,24 +205,24 @@ type Status struct {
 }
 
 type Snapshot struct {
-	GeneratedAt   time.Time          `json:"generated_at"`
-	Server        string             `json:"server"`
-	Room          string             `json:"room"`
-	State         string             `json:"state"`
-	LastError     string             `json:"last_error,omitempty"`
-	PeerID        string             `json:"peer_id,omitempty"`
-	IPv4          string             `json:"ipv4,omitempty"`
-	CIDR          string             `json:"cidr,omitempty"`
-	MAC           string             `json:"mac,omitempty"`
-	MTU           int                `json:"mtu,omitempty"`
-	JoinedAt      time.Time          `json:"joined_at,omitempty"`
-	RoomCreatedAt time.Time          `json:"room_created_at,omitempty"`
+	GeneratedAt   time.Time           `json:"generated_at"`
+	Server        string              `json:"server"`
+	Room          string              `json:"room"`
+	State         string              `json:"state"`
+	LastError     string              `json:"last_error,omitempty"`
+	PeerID        string              `json:"peer_id,omitempty"`
+	IPv4          string              `json:"ipv4,omitempty"`
+	CIDR          string              `json:"cidr,omitempty"`
+	MAC           string              `json:"mac,omitempty"`
+	MTU           int                 `json:"mtu,omitempty"`
+	JoinedAt      time.Time           `json:"joined_at,omitempty"`
+	RoomCreatedAt time.Time           `json:"room_created_at,omitempty"`
 	Peers         []protocol.PeerInfo `json:"peers,omitempty"`
-	RxBytes       uint64             `json:"rx_bytes"`
-	RxFrames      uint64             `json:"rx_frames"`
-	TxBytes       uint64             `json:"tx_bytes"`
-	TxFrames      uint64             `json:"tx_frames"`
-	Reconnects    uint64             `json:"reconnects"`
+	RxBytes       uint64              `json:"rx_bytes"`
+	RxFrames      uint64              `json:"rx_frames"`
+	TxBytes       uint64              `json:"tx_bytes"`
+	TxFrames      uint64              `json:"tx_frames"`
+	Reconnects    uint64              `json:"reconnects"`
 }
 
 func newStatus(cfg Config) *Status {
@@ -243,15 +264,36 @@ func (s *Status) updatePeers(pl protocol.PeerList) {
 	s.peers = pl.Peers
 }
 
-func (s *Status) endSession(err error) {
+func (s *Status) endSession(err error, state string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.state = "reconnecting"
+	s.state = state
 	if err != nil {
 		s.lastError = err.Error()
 	}
 	s.peers = nil
 	s.updatedAt = time.Now()
+}
+
+type fatalError struct {
+	err error
+}
+
+func (e fatalError) Error() string {
+	return e.err.Error()
+}
+
+func (e fatalError) Unwrap() error {
+	return e.err
+}
+
+func fatalf(format string, args ...any) error {
+	return fatalError{err: fmt.Errorf(format, args...)}
+}
+
+func isFatal(err error) bool {
+	var fatal fatalError
+	return errors.As(err, &fatal)
 }
 
 func (s *Status) recordRx(size int) {
@@ -311,10 +353,7 @@ func readTAP(device io.Reader, stream io.Writer, status *Status, errCh chan<- er
 
 func writeTAP(device io.Writer, stream io.Reader, status *Status, errCh chan<- error) {
 	for {
-		// Use MaxControlSize so TypePeerList messages (which can exceed
-		// MaxFrameSize) are not rejected; TypeEthernetFrame size is still
-		// independently enforced inside ReadMessage.
-		typ, payload, err := protocol.ReadMessage(stream, protocol.MaxControlSize)
+		typ, payload, err := protocol.ReadMessage(stream, protocol.MaxFrameSize)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				errCh <- err
@@ -330,6 +369,18 @@ func writeTAP(device io.Writer, stream io.Reader, status *Status, errCh chan<- e
 				return
 			}
 			status.recordRx(len(payload))
+		}
+	}
+}
+
+func readControl(stream io.Reader, status *Status, errCh chan<- error) {
+	for {
+		typ, payload, err := protocol.ReadMessage(stream, protocol.MaxControlSize)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		switch typ {
 		case protocol.TypePeerList:
 			var pl protocol.PeerList
 			if err := json.Unmarshal(payload, &pl); err == nil {

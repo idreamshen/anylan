@@ -20,6 +20,7 @@ var indexTemplate = template.Must(template.ParseFS(staticFiles, "static/index.ht
 type Server struct {
 	Addr     string
 	Title    string
+	Token    string
 	Snapshot func() any
 }
 
@@ -32,9 +33,9 @@ func (s Server) ListenAndServe(ctx context.Context) error {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.handleIndex)
-	mux.HandleFunc("/api/status", s.handleStatus)
-	mux.Handle("/static/", http.FileServer(http.FS(staticFiles)))
+	mux.HandleFunc("/", s.withAuth(s.handleIndex))
+	mux.HandleFunc("/api/status", s.withAuth(s.handleStatus))
+	mux.Handle("/static/", s.withAuth(http.FileServer(http.FS(staticFiles)).ServeHTTP))
 
 	server := &http.Server{
 		Addr:              s.Addr,
@@ -82,6 +83,17 @@ func (s Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(s.Snapshot()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (s Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.Token != "" && r.Header.Get("Authorization") != "Bearer "+s.Token {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="anylan"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
 	}
 }
 
