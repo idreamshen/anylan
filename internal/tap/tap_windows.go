@@ -15,21 +15,27 @@ func DefaultDeviceName() string {
 	return ""
 }
 
+// Open opens a Windows TAP adapter.  It searches for any installed adapter
+// whose ComponentId is "tap0901" or "root\tap0901", regardless of its current
+// interface name.  The adapter is used as-is without renaming.
 func Open(name string) (*Device, error) {
 	var lastErr error
 	for _, componentID := range []string{"tap0901", `root\tap0901`} {
 		cfg := water.Config{
 			DeviceType: water.TAP,
 			PlatformSpecificParams: water.PlatformSpecificParams{
-				ComponentID:   componentID,
-				InterfaceName: name,
+				ComponentID: componentID,
+				// Leave InterfaceName empty so water finds any adapter with
+				// the matching ComponentId, independent of its current name.
+				InterfaceName: "",
 			},
 		}
 		iface, err := water.New(cfg)
-		if err == nil {
-			return &Device{iface: iface}, nil
+		if err != nil {
+			lastErr = err
+			continue
 		}
-		lastErr = err
+		return &Device{iface: iface}, nil
 	}
 	return nil, fmt.Errorf("open Windows TAP adapter failed: %w; install an OpenVPN/tap-windows6 compatible TAP driver and run anylan-client from an Administrator shell", lastErr)
 }

@@ -92,6 +92,11 @@ The user has provided two Linux servers for recurring real-machine client tests:
 - `192.168.89.175` (`anylan-test1`), SSH as `root`.
 - `192.168.89.152` (`anylan-test2`), SSH as `root`.
 
+Two Windows machines are also available (passwordless SSH as `idreamshen`):
+
+- `192.168.89.77` (`gpu-4090-win`), SSH as `idreamshen`.
+- `192.168.89.131` (`gpu-3070-win`), SSH as `idreamshen`.
+
 Use the current development machine as the relay server when appropriate. In the
 current lab network, it has been reachable from the test servers at
 `192.168.89.178`; verify with `hostname -I` before relying on that address.
