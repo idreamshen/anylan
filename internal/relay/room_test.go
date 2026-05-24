@@ -149,11 +149,50 @@ func TestPeerEnqueueCopiesFrame(t *testing.T) {
 	manager := NewManager(netip.MustParsePrefix("10.240.0.0/12"))
 	peer, _ := manager.Join("room")
 	frame := []byte{1, 2, 3}
-	peer.Enqueue(frame)
+	if ok := peer.Enqueue(frame); !ok {
+		t.Fatal("enqueue failed")
+	}
 	frame[0] = 9
 
 	got := <-peer.Frames
 	if bytes.Equal(got, frame) {
 		t.Fatal("queued frame aliases caller buffer")
+	}
+}
+
+func TestManagerSnapshotIncludesPeerMetadataAndCounters(t *testing.T) {
+	manager := NewManager(netip.MustParsePrefix("10.240.0.0/12"))
+	peer, err := manager.Join("room", JoinOptions{DisplayName: "test peer"})
+	if err != nil {
+		t.Fatalf("join failed: %v", err)
+	}
+	peer.RecordRxFrame(60)
+	if ok := peer.Enqueue([]byte{1, 2, 3, 4}); !ok {
+		t.Fatal("enqueue failed")
+	}
+
+	snapshot := manager.Snapshot()
+	if snapshot.Pool != "10.240.0.0/12" {
+		t.Fatalf("pool = %q", snapshot.Pool)
+	}
+	if len(snapshot.Rooms) != 1 {
+		t.Fatalf("got %d rooms, want 1", len(snapshot.Rooms))
+	}
+	room := snapshot.Rooms[0]
+	if room.Name != "room" {
+		t.Fatalf("room name = %q", room.Name)
+	}
+	if len(room.Peers) != 1 {
+		t.Fatalf("got %d peers, want 1", len(room.Peers))
+	}
+	got := room.Peers[0]
+	if got.DisplayName != "test peer" {
+		t.Fatalf("display name = %q", got.DisplayName)
+	}
+	if got.RxBytes != 60 || got.RxFrames != 1 {
+		t.Fatalf("rx counters = %d/%d, want 60/1", got.RxBytes, got.RxFrames)
+	}
+	if got.TxBytes != 4 || got.TxFrames != 1 {
+		t.Fatalf("tx counters = %d/%d, want 4/1", got.TxBytes, got.TxFrames)
 	}
 }

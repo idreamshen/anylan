@@ -18,6 +18,7 @@ func main() {
 		tlsKey          = flag.String("tls-key", "", "TLS private key path")
 		insecureDevCert = flag.Bool("insecure-dev-cert", false, "generate an ephemeral self-signed certificate for local development")
 		mtu             = flag.Int("mtu", 1300, "TAP MTU announced to clients")
+		web             = flag.String("web", "", "optional HTTP status listen address, for example 127.0.0.1:8080")
 	)
 	flag.Parse()
 
@@ -36,6 +37,7 @@ func main() {
 		TLSKeyFile:      *tlsKey,
 		InsecureDevCert: *insecureDevCert,
 		MTU:             *mtu,
+		WebAddr:         *web,
 	}
 	log.Printf("anylan-server listening on %s with pool %s", *listen, parsedPool)
 	if err := srv.ListenAndServe(ctx); err != nil && ctx.Err() == nil {

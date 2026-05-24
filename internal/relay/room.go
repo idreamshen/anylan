@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 const (
@@ -39,12 +41,47 @@ type Room struct {
 }
 
 type Peer struct {
-	ID      string
-	Room    *Room
-	IP      netip.Addr
-	MAC     net.HardwareAddr
-	Frames  chan []byte
-	closing sync.Once
+	ID          string
+	DisplayName string
+	Room        *Room
+	IP          netip.Addr
+	MAC         net.HardwareAddr
+	ConnectedAt time.Time
+	Frames      chan []byte
+	closing     sync.Once
+
+	rxBytes  atomic.Uint64
+	rxFrames atomic.Uint64
+	txBytes  atomic.Uint64
+	txFrames atomic.Uint64
+}
+
+type JoinOptions struct {
+	DisplayName string
+}
+
+type ManagerSnapshot struct {
+	GeneratedAt time.Time      `json:"generated_at"`
+	Pool        string         `json:"pool"`
+	Rooms       []RoomSnapshot `json:"rooms"`
+}
+
+type RoomSnapshot struct {
+	Name   string         `json:"name"`
+	Prefix string         `json:"prefix"`
+	Peers  []PeerSnapshot `json:"peers"`
+}
+
+type PeerSnapshot struct {
+	ID          string    `json:"id"`
+	DisplayName string    `json:"display_name,omitempty"`
+	IP          string    `json:"ip"`
+	MAC         string    `json:"mac"`
+	ConnectedAt time.Time `json:"connected_at"`
+	RxBytes     uint64    `json:"rx_bytes"`
+	RxFrames    uint64    `json:"rx_frames"`
+	TxBytes     uint64    `json:"tx_bytes"`
+	TxFrames    uint64    `json:"tx_frames"`
 }
 
 func NewManager(pool netip.Prefix) *Manager {
@@ -54,12 +91,16 @@ func NewManager(pool netip.Prefix) *Manager {
 	}
 }
 
-func (m *Manager) Join(roomName string) (*Peer, error) {
+func (m *Manager) Join(roomName string, opts ...JoinOptions) (*Peer, error) {
 	room, err := m.getOrCreateRoom(roomName)
 	if err != nil {
 		return nil, err
 	}
-	return room.AddPeer()
+	var opt JoinOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	return room.AddPeer(opt)
 }
 
 func (m *Manager) Room(roomName string) (*Room, bool) {
@@ -67,6 +108,26 @@ func (m *Manager) Room(roomName string) (*Room, bool) {
 	defer m.mu.Unlock()
 	room, ok := m.rooms[roomName]
 	return room, ok
+}
+
+func (m *Manager) Snapshot() ManagerSnapshot {
+	m.mu.Lock()
+	rooms := make([]*Room, 0, len(m.rooms))
+	for _, room := range m.rooms {
+		rooms = append(rooms, room)
+	}
+	pool := m.pool.String()
+	m.mu.Unlock()
+
+	snapshot := ManagerSnapshot{
+		GeneratedAt: time.Now(),
+		Pool:        pool,
+		Rooms:       make([]RoomSnapshot, 0, len(rooms)),
+	}
+	for _, room := range rooms {
+		snapshot.Rooms = append(snapshot.Rooms, room.Snapshot())
+	}
+	return snapshot
 }
 
 func (m *Manager) getOrCreateRoom(roomName string) (*Room, error) {
@@ -108,7 +169,7 @@ func (r *Room) Prefix() netip.Prefix {
 	return r.prefix
 }
 
-func (r *Room) AddPeer() (*Peer, error) {
+func (r *Room) AddPeer(opts ...JoinOptions) (*Peer, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -132,15 +193,40 @@ func (r *Room) AddPeer() (*Peer, error) {
 	ip := uint32ToIPv4(ipBase + uint32(r.nextHost))
 	r.nextHost++
 
+	var opt JoinOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
 	peer := &Peer{
-		ID:     peerID,
-		Room:   r,
-		IP:     ip,
-		MAC:    mac,
-		Frames: make(chan []byte, 128),
+		ID:          peerID,
+		DisplayName: opt.DisplayName,
+		Room:        r,
+		IP:          ip,
+		MAC:         mac,
+		ConnectedAt: time.Now(),
+		Frames:      make(chan []byte, 128),
 	}
 	r.peers[peer.ID] = peer
 	return peer, nil
+}
+
+func (r *Room) Snapshot() RoomSnapshot {
+	r.mu.Lock()
+	peers := make([]*Peer, 0, len(r.peers))
+	for _, peer := range r.peers {
+		peers = append(peers, peer)
+	}
+	snapshot := RoomSnapshot{
+		Name:   r.name,
+		Prefix: r.prefix.String(),
+		Peers:  make([]PeerSnapshot, 0, len(peers)),
+	}
+	r.mu.Unlock()
+
+	for _, peer := range peers {
+		snapshot.Peers = append(snapshot.Peers, peer.Snapshot())
+	}
+	return snapshot
 }
 
 func (r *Room) RemovePeer(peer *Peer) {
@@ -190,11 +276,38 @@ func (r *Room) Forward(from *Peer, frame []byte) ([]*Peer, error) {
 	return r.otherPeersLocked(from), nil
 }
 
-func (p *Peer) Enqueue(frame []byte) {
+func (p *Peer) Enqueue(frame []byte) bool {
 	copied := append([]byte(nil), frame...)
 	select {
 	case p.Frames <- copied:
+		p.RecordTxFrame(len(copied))
+		return true
 	default:
+		return false
+	}
+}
+
+func (p *Peer) RecordRxFrame(size int) {
+	p.rxFrames.Add(1)
+	p.rxBytes.Add(uint64(size))
+}
+
+func (p *Peer) RecordTxFrame(size int) {
+	p.txFrames.Add(1)
+	p.txBytes.Add(uint64(size))
+}
+
+func (p *Peer) Snapshot() PeerSnapshot {
+	return PeerSnapshot{
+		ID:          p.ID,
+		DisplayName: p.DisplayName,
+		IP:          p.IP.String(),
+		MAC:         p.MAC.String(),
+		ConnectedAt: p.ConnectedAt,
+		RxBytes:     p.rxBytes.Load(),
+		RxFrames:    p.rxFrames.Load(),
+		TxBytes:     p.txBytes.Load(),
+		TxFrames:    p.txFrames.Load(),
 	}
 }
 

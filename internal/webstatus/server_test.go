@@ -1,0 +1,42 @@
+package webstatus
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestHandlersServeIndexAndStatus(t *testing.T) {
+	server := Server{
+		Title: "test status",
+		Snapshot: func() any {
+			return map[string]string{"state": "ok"}
+		},
+	}
+
+	indexReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	indexRec := httptest.NewRecorder()
+	server.handleIndex(indexRec, indexReq)
+	if indexRec.Code != http.StatusOK {
+		t.Fatalf("index status = %d", indexRec.Code)
+	}
+	if !strings.Contains(indexRec.Body.String(), "test status") {
+		t.Fatal("index did not include title")
+	}
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	statusRec := httptest.NewRecorder()
+	server.handleStatus(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("status code = %d", statusRec.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode status failed: %v", err)
+	}
+	if body["state"] != "ok" {
+		t.Fatalf("state = %q", body["state"])
+	}
+}

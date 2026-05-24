@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"log"
 	"math/big"
 	"net"
 	"net/netip"
@@ -18,6 +19,7 @@ import (
 	"github.com/idreamshen/anylan/internal/control"
 	"github.com/idreamshen/anylan/internal/protocol"
 	"github.com/idreamshen/anylan/internal/relay"
+	"github.com/idreamshen/anylan/internal/webstatus"
 	"github.com/quic-go/quic-go"
 )
 
@@ -30,6 +32,7 @@ type Server struct {
 	TLSKeyFile      string
 	InsecureDevCert bool
 	MTU             int
+	WebAddr         string
 }
 
 func (s Server) ListenAndServe(ctx context.Context) error {
@@ -71,6 +74,18 @@ func (s Server) Serve(ctx context.Context, listener *quic.Listener) error {
 	handler := control.Handler{
 		Manager: manager,
 		MTU:     s.MTU,
+	}
+	if s.WebAddr != "" {
+		go func() {
+			err := webstatus.Server{
+				Addr:     s.WebAddr,
+				Title:    "anylan server",
+				Snapshot: func() any { return manager.Snapshot() },
+			}.ListenAndServe(ctx)
+			if err != nil && ctx.Err() == nil {
+				log.Printf("web status error: %v", err)
+			}
+		}()
 	}
 	for {
 		conn, err := listener.Accept(ctx)

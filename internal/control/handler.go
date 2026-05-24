@@ -57,7 +57,9 @@ func (h Handler) handleStream(ctx context.Context, stream quic.Stream) error {
 		return errRejected
 	}
 
-	peer, err := h.Manager.Join(join.Room)
+	peer, err := h.Manager.Join(join.Room, relay.JoinOptions{
+		DisplayName: join.DisplayName,
+	})
 	if err != nil {
 		rejectAndCloseStream(stream, err.Error())
 		return errRejected
@@ -106,6 +108,7 @@ func (h Handler) handleStream(ctx context.Context, stream quic.Stream) error {
 		}
 		switch typ {
 		case protocol.TypeEthernetFrame:
+			peer.RecordRxFrame(len(payload))
 			targets, err := peer.Room.Forward(peer, payload)
 			if err != nil {
 				continue
