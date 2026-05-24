@@ -55,8 +55,11 @@ On a machine reachable by all players:
 For quick testing without real TLS certificates:
 
 ```bash
-./anylan-server --listen :4433 --insecure-dev-cert
+./anylan-server --listen :4433 --insecure-dev-cert --web 0.0.0.0:8080
 ```
+
+The `--web` flag is optional but recommended: it exposes a status page at the
+given address where you can see connected rooms and peers.
 
 ### 2. Join a Room
 
@@ -122,6 +125,15 @@ IP (`ip addr show anylan0` on Linux, or `ipconfig` on Windows).
 `sudo ip link delete anylan0`
 
 ## Building from Source
+
+```bash
+make test          # run the test suite
+make build         # build client and server for the current platform
+make build-windows # cross-compile Windows client (anylan-client.exe)
+make clean         # remove built binaries
+```
+
+Or directly with Go:
 
 ```bash
 go test ./...

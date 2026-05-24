@@ -30,14 +30,19 @@ The current design is intentionally narrow:
 Run the full test suite before finishing code changes:
 
 ```bash
-go test ./...
+make test
 ```
 
 Build both binaries:
 
 ```bash
-go build ./cmd/client
-go build ./cmd/server
+make build
+```
+
+Cross-compile the Windows client:
+
+```bash
+make build-windows
 ```
 
 The client uses Linux TAP devices and `ip` commands, so real client runs require Linux and root privileges. Unit tests should not require root.
@@ -47,7 +52,7 @@ The client uses Linux TAP devices and `ip` commands, so real client runs require
 Start a local relay with an ephemeral self-signed certificate:
 
 ```bash
-go run ./cmd/server --listen :4433 --insecure-dev-cert
+go run ./cmd/server --listen :4433 --insecure-dev-cert --web 0.0.0.0:8080
 ```
 
 Join from a Linux client:
