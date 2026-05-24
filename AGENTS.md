@@ -119,6 +119,31 @@ Confirm both clients receive `10.240.x.y/24` addresses, then ping each virtual I
 from the other test server. Stop the client sessions with `Ctrl-C` and confirm no
 `/tmp/anylan-client join` process or `anylan0` device is left behind.
 
+### Automated L2 smoke test
+
+For a scripted version of the above two-machine flow that also verifies L2
+specifics (ARP broadcast flood, custom EtherType `0x88b5` forwarding, cross-room
+isolation), run:
+
+```bash
+./scripts/manual-l2-test.sh
+```
+
+Defaults match the two test servers above and use the local dev machine as the
+relay. Override with `--remote1`, `--remote2`, `--relay-ip`, `--relay-port`,
+`--room`, or `--dev`. Pass `--keep` to leave the relay and remote clients
+running after the run for follow-up debugging.
+
+The script requires:
+
+- `go` in `PATH` on the dev machine.
+- Passwordless `ssh` as root to both remotes.
+- `iputils-arping`, `tcpdump`, and `python3` on both remotes; the script will
+  `apt-get install` them automatically if missing.
+
+Output is a per-test `PASS/FAIL/SKIP` table; per-test logs land in
+`/tmp/anylan-l2-test-<timestamp>/`. Exit code is `0` if all tests pass.
+
 ## Implementation Notes
 
 - Keep protocol changes backward-conscious. `internal/protocol` defines message types, size limits, and the protocol version.
