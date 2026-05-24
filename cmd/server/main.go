@@ -18,7 +18,7 @@ func main() {
 		tlsKey          = flag.String("tls-key", "", "TLS private key path")
 		insecureDevCert = flag.Bool("insecure-dev-cert", false, "generate an ephemeral self-signed certificate for local development")
 		mtu             = flag.Int("mtu", 1300, "TAP MTU announced to clients")
-		web             = flag.String("web", "", "optional HTTP status listen address, for example 127.0.0.1:8080")
+		web             = flag.String("web", "0.0.0.0:8080", "HTTP status listen address")
 	)
 	flag.Parse()
 

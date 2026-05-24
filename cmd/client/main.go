@@ -24,8 +24,8 @@ func main() {
 	room := fs.String("room", "", "room code")
 	name := fs.String("name", "", "optional display name")
 	dev := fs.String("dev", tap.DefaultDeviceName(), "TAP device name")
-	insecureSkipVerify := fs.Bool("insecure-skip-verify", false, "skip server certificate verification for local development")
-	web := fs.String("web", "", "optional HTTP status listen address, for example 127.0.0.1:8081")
+	insecureSkipVerify := fs.Bool("insecure-skip-verify", true, "skip server certificate verification for local development")
+	web := fs.String("web", "0.0.0.0:8081", "HTTP status listen address")
 	_ = fs.Parse(os.Args[2:])
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
