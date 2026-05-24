@@ -17,7 +17,7 @@ import (
 
 	"github.com/idreamshen/anylan/internal/protocol"
 	"github.com/idreamshen/anylan/internal/tap"
-	"github.com/idreamshen/anylan/internal/webstatus"
+	"github.com/idreamshen/anylan/internal/webui"
 	"github.com/quic-go/quic-go"
 )
 
@@ -47,13 +47,13 @@ func Run(ctx context.Context, cfg Config) error {
 	status := newStatus(cfg)
 	if cfg.WebAddr != "" {
 		go func() {
-			err := webstatus.Server{
+			err := webui.Server{
 				Addr:     cfg.WebAddr,
 				Title:    "anylan client",
 				Snapshot: func() any { return status.Snapshot() },
 			}.ListenAndServe(ctx)
 			if err != nil && ctx.Err() == nil {
-				log.Printf("web status error: %v", err)
+				log.Printf("web UI error: %v", err)
 			}
 		}()
 	}

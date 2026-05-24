@@ -19,7 +19,7 @@ import (
 	"github.com/idreamshen/anylan/internal/control"
 	"github.com/idreamshen/anylan/internal/protocol"
 	"github.com/idreamshen/anylan/internal/relay"
-	"github.com/idreamshen/anylan/internal/webstatus"
+	"github.com/idreamshen/anylan/internal/webui"
 	"github.com/quic-go/quic-go"
 )
 
@@ -77,13 +77,13 @@ func (s Server) Serve(ctx context.Context, listener *quic.Listener) error {
 	}
 	if s.WebAddr != "" {
 		go func() {
-			err := webstatus.Server{
+			err := webui.Server{
 				Addr:     s.WebAddr,
 				Title:    "anylan server",
 				Snapshot: func() any { return manager.Snapshot() },
 			}.ListenAndServe(ctx)
 			if err != nil && ctx.Err() == nil {
-				log.Printf("web status error: %v", err)
+				log.Printf("web UI error: %v", err)
 			}
 		}()
 	}

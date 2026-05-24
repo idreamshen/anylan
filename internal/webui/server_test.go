@@ -1,4 +1,4 @@
-package webstatus
+package webui
 
 import (
 	"encoding/json"
@@ -24,6 +24,9 @@ func TestHandlersServeIndexAndStatus(t *testing.T) {
 	}
 	if !strings.Contains(indexRec.Body.String(), "test status") {
 		t.Fatal("index did not include title")
+	}
+	if !strings.Contains(indexRec.Body.String(), `/static/app.js`) {
+		t.Fatal("index did not include app script")
 	}
 
 	statusReq := httptest.NewRequest(http.MethodGet, "/api/status", nil)
