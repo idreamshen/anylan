@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,8 +32,9 @@ type Manager struct {
 }
 
 type Room struct {
-	name   string
-	prefix netip.Prefix
+	name      string
+	prefix    netip.Prefix
+	createdAt time.Time
 
 	mu        sync.Mutex
 	peers     map[string]*Peer
@@ -67,9 +69,10 @@ type ManagerSnapshot struct {
 }
 
 type RoomSnapshot struct {
-	Name   string         `json:"name"`
-	Prefix string         `json:"prefix"`
-	Peers  []PeerSnapshot `json:"peers"`
+	Name      string         `json:"name"`
+	Prefix    string         `json:"prefix"`
+	CreatedAt time.Time      `json:"created_at"`
+	Peers     []PeerSnapshot `json:"peers"`
 }
 
 type PeerSnapshot struct {
@@ -119,6 +122,14 @@ func (m *Manager) Snapshot() ManagerSnapshot {
 	pool := m.pool.String()
 	m.mu.Unlock()
 
+	// Stable order for UI/API consumers: oldest room first, tiebreak by name.
+	sort.SliceStable(rooms, func(i, j int) bool {
+		if rooms[i].createdAt.Equal(rooms[j].createdAt) {
+			return rooms[i].name < rooms[j].name
+		}
+		return rooms[i].createdAt.Before(rooms[j].createdAt)
+	})
+
 	snapshot := ManagerSnapshot{
 		GeneratedAt: time.Now(),
 		Pool:        pool,
@@ -153,6 +164,7 @@ func (m *Manager) getOrCreateRoom(roomName string) (*Room, error) {
 	room := &Room{
 		name:      roomName,
 		prefix:    netip.PrefixFrom(roomAddr, 24),
+		createdAt: time.Now(),
 		peers:     make(map[string]*Peer),
 		macToPeer: make(map[string]*Peer),
 		nextHost:  firstUsableHost,
@@ -217,11 +229,20 @@ func (r *Room) Snapshot() RoomSnapshot {
 		peers = append(peers, peer)
 	}
 	snapshot := RoomSnapshot{
-		Name:   r.name,
-		Prefix: r.prefix.String(),
-		Peers:  make([]PeerSnapshot, 0, len(peers)),
+		Name:      r.name,
+		Prefix:    r.prefix.String(),
+		CreatedAt: r.createdAt,
+		Peers:     make([]PeerSnapshot, 0, len(peers)),
 	}
 	r.mu.Unlock()
+
+	// Stable order for UI/API consumers: oldest connection first, tiebreak by ID.
+	sort.SliceStable(peers, func(i, j int) bool {
+		if peers[i].ConnectedAt.Equal(peers[j].ConnectedAt) {
+			return peers[i].ID < peers[j].ID
+		}
+		return peers[i].ConnectedAt.Before(peers[j].ConnectedAt)
+	})
 
 	for _, peer := range peers {
 		snapshot.Peers = append(snapshot.Peers, peer.Snapshot())

@@ -262,6 +262,11 @@ function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
 }
 
+function fmtTime(ts) {
+  if (!ts) return "-";
+  return new Date(ts).toLocaleString();
+}
+
 function render(data) {
   if (Array.isArray(data.rooms)) {
     renderServer(data);
@@ -273,15 +278,33 @@ function render(data) {
 
 function renderServer(data) {
   const peers = data.rooms.flatMap(room => (room.peers || []).map(peer => ({ room, peer })));
+  peers.sort((a, b) => {
+    const tA = new Date(a.peer.connected_at).getTime();
+    const tB = new Date(b.peer.connected_at).getTime();
+    if (tA !== tB) return tA - tB;
+    return a.room.name < b.room.name ? -1 : a.room.name > b.room.name ? 1 : 0;
+  });
   const rx = peers.reduce((sum, item) => sum + (item.peer.rx_bytes || 0), 0);
   const tx = peers.reduce((sum, item) => sum + (item.peer.tx_bytes || 0), 0);
-  const rows = peers.map(({ room, peer }) => "<tr>" +
-    "<td>" + esc(room.name) + "</td>" +
+  const roomRows = data.rooms.map(room => {
+    const rRx = (room.peers || []).reduce((s, p) => s + (p.rx_bytes || 0), 0);
+    const rTx = (room.peers || []).reduce((s, p) => s + (p.tx_bytes || 0), 0);
+    return "<tr>" +
+      "<td>" + esc(room.name) + "</td>" +
+      "<td>" + (room.peers || []).length + "</td>" +
+      "<td>" + fmtTime(room.created_at) + "</td>" +
+      "<td>" + bytes(rRx) + "</td>" +
+      "<td>" + bytes(rTx) + "</td>" +
+    "</tr>";
+  }).join("");
+  const peerRows = peers.map(({ room, peer }) => "<tr>" +
     "<td>" + esc(peer.display_name || peer.id) + "</td>" +
+    "<td>" + esc(room.name) + "</td>" +
     "<td>" + esc(peer.ip) + "</td>" +
     "<td>" + esc(peer.mac) + "</td>" +
     "<td>" + bytes(peer.rx_bytes || 0) + "</td>" +
     "<td>" + bytes(peer.tx_bytes || 0) + "</td>" +
+    "<td>" + fmtTime(peer.connected_at) + "</td>" +
   "</tr>").join("");
   app.innerHTML =
     "<div class=\"grid\">" +
@@ -291,10 +314,17 @@ function renderServer(data) {
       metric("TX total", bytes(tx)) +
     "</div>" +
     "<section>" +
+      "<h2>Rooms</h2>" +
+      "<div class=\"table-wrap\"><table>" +
+        "<thead><tr><th>Name</th><th>Peers</th><th>Created</th><th>RX</th><th>TX</th></tr></thead>" +
+        "<tbody>" + (roomRows || "<tr><td colspan=\"5\" class=\"muted\">No active rooms</td></tr>") + "</tbody>" +
+      "</table></div>" +
+    "</section>" +
+    "<section>" +
       "<h2>Peers</h2>" +
       "<div class=\"table-wrap\"><table>" +
-        "<thead><tr><th>Room</th><th>Name / ID</th><th>IP</th><th>MAC</th><th>RX</th><th>TX</th></tr></thead>" +
-        "<tbody>" + (rows || "<tr><td colspan=\"6\" class=\"muted\">No active peers</td></tr>") + "</tbody>" +
+        "<thead><tr><th>Name / ID</th><th>Room</th><th>IP</th><th>MAC</th><th>RX</th><th>TX</th><th>Connected</th></tr></thead>" +
+        "<tbody>" + (peerRows || "<tr><td colspan=\"7\" class=\"muted\">No active peers</td></tr>") + "</tbody>" +
       "</table></div>" +
     "</section>";
 }

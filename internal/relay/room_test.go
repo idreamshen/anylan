@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"sort"
 	"testing"
+	"time"
 )
 
 func TestManagerAssignsUniqueIPsAndIsolatesRooms(t *testing.T) {
@@ -195,4 +197,179 @@ func TestManagerSnapshotIncludesPeerMetadataAndCounters(t *testing.T) {
 	if got.TxBytes != 4 || got.TxFrames != 1 {
 		t.Fatalf("tx counters = %d/%d, want 4/1", got.TxBytes, got.TxFrames)
 	}
+}
+
+func TestRoomSnapshotPeersSortedByConnectedAt(t *testing.T) {
+	manager := NewManager(netip.MustParsePrefix("10.240.0.0/12"))
+
+	// Join 5 peers, then rewrite ConnectedAt to a known shuffled order so the
+	// test does not rely on map iteration order or wall-clock spacing.
+	const n = 5
+	peers := make([]*Peer, 0, n)
+	for i := 0; i < n; i++ {
+		p, err := manager.Join("room")
+		if err != nil {
+			t.Fatalf("join %d failed: %v", i, err)
+		}
+		peers = append(peers, p)
+	}
+
+	base := time.Unix(1_700_000_000, 0)
+	// Assign timestamps in a non-sorted order relative to peer creation order.
+	offsets := []int{40, 10, 30, 0, 20}
+	for i, off := range offsets {
+		peers[i].ConnectedAt = base.Add(time.Duration(off) * time.Second)
+	}
+
+	rs := manager.Snapshot().Rooms[0]
+	if len(rs.Peers) != n {
+		t.Fatalf("snapshot peers = %d, want %d", len(rs.Peers), n)
+	}
+	for i := 1; i < len(rs.Peers); i++ {
+		prev, cur := rs.Peers[i-1].ConnectedAt, rs.Peers[i].ConnectedAt
+		if cur.Before(prev) {
+			t.Fatalf("peers not sorted ascending by ConnectedAt: %v before %v at index %d", cur, prev, i)
+		}
+	}
+
+	// Repeated calls must yield the same order.
+	first := snapshotIDs(manager.Snapshot().Rooms[0])
+	for i := 0; i < 20; i++ {
+		got := snapshotIDs(manager.Snapshot().Rooms[0])
+		if !equalStrings(first, got) {
+			t.Fatalf("snapshot order not stable: first=%v got=%v", first, got)
+		}
+	}
+}
+
+func TestManagerSnapshotRoomsSortedByCreatedAt(t *testing.T) {
+	manager := NewManager(netip.MustParsePrefix("10.240.0.0/12"))
+
+	// Create rooms in a name order that does NOT match the eventual createdAt order,
+	// so a passing test cannot be explained by name-based or insertion-order sorting alone.
+	names := []string{"charlie", "alpha", "delta", "bravo"}
+	for _, name := range names {
+		if _, err := manager.getOrCreateRoom(name); err != nil {
+			t.Fatalf("create room %q failed: %v", name, err)
+		}
+	}
+
+	base := time.Unix(1_700_000_000, 0)
+	offsets := map[string]int{
+		"charlie": 30,
+		"alpha":   10,
+		"delta":   40,
+		"bravo":   20,
+	}
+	for name, off := range offsets {
+		room, ok := manager.Room(name)
+		if !ok {
+			t.Fatalf("room %q missing", name)
+		}
+		room.createdAt = base.Add(time.Duration(off) * time.Second)
+	}
+
+	snap := manager.Snapshot()
+	if len(snap.Rooms) != len(names) {
+		t.Fatalf("got %d rooms, want %d", len(snap.Rooms), len(names))
+	}
+	wantOrder := []string{"alpha", "bravo", "charlie", "delta"}
+	for i, want := range wantOrder {
+		if snap.Rooms[i].Name != want {
+			t.Fatalf("rooms[%d] = %q, want %q (full: %v)", i, snap.Rooms[i].Name, want, roomNames(snap))
+		}
+		if snap.Rooms[i].CreatedAt.IsZero() {
+			t.Fatalf("rooms[%d].CreatedAt is zero", i)
+		}
+	}
+	for i := 1; i < len(snap.Rooms); i++ {
+		if snap.Rooms[i].CreatedAt.Before(snap.Rooms[i-1].CreatedAt) {
+			t.Fatalf("rooms not sorted ascending by CreatedAt at index %d", i)
+		}
+	}
+
+	// Stable across repeated calls.
+	first := roomNames(snap)
+	for i := 0; i < 20; i++ {
+		if !equalStrings(first, roomNames(manager.Snapshot())) {
+			t.Fatalf("rooms order not stable across snapshots")
+		}
+	}
+}
+
+func TestManagerSnapshotRoomsTiebreakByName(t *testing.T) {
+	manager := NewManager(netip.MustParsePrefix("10.240.0.0/12"))
+	for _, name := range []string{"zulu", "alpha", "mike"} {
+		if _, err := manager.getOrCreateRoom(name); err != nil {
+			t.Fatalf("create room %q failed: %v", name, err)
+		}
+	}
+	same := time.Unix(1_700_000_000, 0)
+	for _, name := range []string{"zulu", "alpha", "mike"} {
+		room, _ := manager.Room(name)
+		room.createdAt = same
+	}
+
+	snap := manager.Snapshot()
+	got := roomNames(snap)
+	want := []string{"alpha", "mike", "zulu"}
+	if !equalStrings(got, want) {
+		t.Fatalf("tiebreak by name failed: got %v want %v", got, want)
+	}
+}
+
+func roomNames(s ManagerSnapshot) []string {
+	out := make([]string, 0, len(s.Rooms))
+	for _, r := range s.Rooms {
+		out = append(out, r.Name)
+	}
+	return out
+}
+
+func TestRoomSnapshotPeersTiebreakByID(t *testing.T) {
+	manager := NewManager(netip.MustParsePrefix("10.240.0.0/12"))
+
+	const n = 6
+	peers := make([]*Peer, 0, n)
+	for i := 0; i < n; i++ {
+		p, err := manager.Join("room")
+		if err != nil {
+			t.Fatalf("join %d failed: %v", i, err)
+		}
+		peers = append(peers, p)
+	}
+	// Force identical ConnectedAt to exercise the tiebreak path.
+	same := time.Unix(1_700_000_000, 0)
+	for _, p := range peers {
+		p.ConnectedAt = same
+	}
+
+	rs := manager.Snapshot().Rooms[0]
+	ids := make([]string, 0, len(rs.Peers))
+	for _, p := range rs.Peers {
+		ids = append(ids, p.ID)
+	}
+	if !sort.StringsAreSorted(ids) {
+		t.Fatalf("tiebreak by ID failed; got %v", ids)
+	}
+}
+
+func snapshotIDs(r RoomSnapshot) []string {
+	out := make([]string, 0, len(r.Peers))
+	for _, p := range r.Peers {
+		out = append(out, p.ID)
+	}
+	return out
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
