@@ -111,6 +111,50 @@ func TestForwardRejectsSpoofedSourceMAC(t *testing.T) {
 	}
 }
 
+func TestJoinUsesRequestedMAC(t *testing.T) {
+	manager := NewManager(netip.MustParsePrefix("10.240.0.0/12"))
+	requested := mac("02:00:00:00:00:0a")
+	peer, err := manager.Join("room", JoinOptions{RequestedMAC: requested})
+	if err != nil {
+		t.Fatalf("join failed: %v", err)
+	}
+	if !bytes.Equal(peer.MAC, requested) {
+		t.Fatalf("mac = %s, want %s", peer.MAC, requested)
+	}
+
+	requested[5] = 0x0b
+	if peer.MAC.String() != "02:00:00:00:00:0a" {
+		t.Fatalf("peer MAC aliases caller buffer: %s", peer.MAC)
+	}
+}
+
+func TestJoinRejectsInvalidRequestedMAC(t *testing.T) {
+	manager := NewManager(netip.MustParsePrefix("10.240.0.0/12"))
+	for _, requested := range []net.HardwareAddr{
+		mac("00:00:00:00:00:00"),
+		mac("ff:ff:ff:ff:ff:ff"),
+		mac("01:00:5e:00:00:01"),
+	} {
+		if _, err := manager.Join("room", JoinOptions{RequestedMAC: requested}); !errors.Is(err, ErrMACInvalid) {
+			t.Fatalf("join with %s error = %v, want %v", requested, err, ErrMACInvalid)
+		}
+	}
+}
+
+func TestJoinRejectsDuplicateRequestedMAC(t *testing.T) {
+	manager := NewManager(netip.MustParsePrefix("10.240.0.0/12"))
+	requested := mac("02:00:00:00:00:0a")
+	if _, err := manager.Join("room", JoinOptions{RequestedMAC: requested}); err != nil {
+		t.Fatalf("first join failed: %v", err)
+	}
+	if _, err := manager.Join("room", JoinOptions{RequestedMAC: requested}); !errors.Is(err, ErrMACInUse) {
+		t.Fatalf("second join error = %v, want %v", err, ErrMACInUse)
+	}
+	if _, err := manager.Join("other", JoinOptions{RequestedMAC: requested}); err != nil {
+		t.Fatalf("same MAC in different room should be allowed: %v", err)
+	}
+}
+
 func ethernetFrame(dst, src net.HardwareAddr) []byte {
 	frame := make([]byte, 60)
 	copy(frame[0:6], dst)

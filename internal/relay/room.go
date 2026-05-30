@@ -27,6 +27,8 @@ var (
 	ErrRoomFull         = errors.New("room is full")
 	ErrRoomClosed       = errors.New("room is closed")
 	ErrPoolFull         = errors.New("room pool is full")
+	ErrMACInUse         = errors.New("mac address is already in use")
+	ErrMACInvalid       = errors.New("invalid mac address")
 	ErrInvalidFrame     = errors.New("invalid ethernet frame")
 	ErrSourceMACInvalid = errors.New("ethernet source MAC does not match peer")
 )
@@ -81,7 +83,8 @@ type Peer struct {
 }
 
 type JoinOptions struct {
-	DisplayName string
+	DisplayName  string
+	RequestedMAC net.HardwareAddr
 }
 
 type ManagerSnapshot struct {
@@ -253,6 +256,10 @@ func (r *Room) PeerCount() int {
 func (r *Room) AddPeer(opts ...JoinOptions) (*Peer, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	var opt JoinOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
 
 	if r.closed {
 		return nil, ErrRoomClosed
@@ -262,9 +269,20 @@ func (r *Room) AddPeer(opts ...JoinOptions) (*Peer, error) {
 	if err != nil {
 		return nil, err
 	}
-	mac, err := randomMAC()
-	if err != nil {
-		return nil, err
+	mac := cloneMAC(opt.RequestedMAC)
+	if mac != nil {
+		if !validPeerMAC(mac) {
+			return nil, ErrMACInvalid
+		}
+		if r.macToPeer[string(mac)] != nil {
+			return nil, ErrMACInUse
+		}
+	} else {
+		var err error
+		mac, err = randomMAC()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	host, err := r.allocateHostLocked()
@@ -278,10 +296,6 @@ func (r *Room) AddPeer(opts ...JoinOptions) (*Peer, error) {
 	}
 	ip := uint32ToIPv4(ipBase + uint32(host))
 
-	var opt JoinOptions
-	if len(opts) > 0 {
-		opt = opts[0]
-	}
 	peer := &Peer{
 		ID:          peerID,
 		DisplayName: opt.DisplayName,
@@ -522,6 +536,25 @@ func isBroadcast(mac []byte) bool {
 
 func isMulticast(mac []byte) bool {
 	return len(mac) > 0 && mac[0]&1 == 1
+}
+
+func validPeerMAC(mac net.HardwareAddr) bool {
+	if len(mac) != 6 || isBroadcast(mac) || isMulticast(mac) {
+		return false
+	}
+	for _, b := range mac {
+		if b != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneMAC(mac net.HardwareAddr) net.HardwareAddr {
+	if mac == nil {
+		return nil
+	}
+	return append(net.HardwareAddr(nil), mac...)
 }
 
 func randomMAC() (net.HardwareAddr, error) {

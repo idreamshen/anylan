@@ -38,6 +38,7 @@ type JoinRoom struct {
 	Version     int    `json:"version"`
 	Room        string `json:"room"`
 	DisplayName string `json:"display_name,omitempty"`
+	MAC         string `json:"mac,omitempty"`
 	Nonce       string `json:"nonce,omitempty"`
 }
 

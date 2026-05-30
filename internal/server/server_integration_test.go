@@ -118,6 +118,32 @@ func TestServerRejectsDifferentProtocolVersion(t *testing.T) {
 	}
 }
 
+func TestServerUsesRequestedMAC(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server := Server{InsecureDevCert: true}
+	udpConn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen packet failed: %v", err)
+	}
+	listener, err := server.Listen(ctx, udpConn)
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer listener.Close()
+	go func() {
+		_ = server.Serve(ctx, listener)
+	}()
+
+	requested := "02:00:00:00:00:0a"
+	client := joinTestClientWithMAC(t, ctx, listener.Addr().String(), "room", requested)
+	defer client.close()
+	if client.accept.MAC != requested {
+		t.Fatalf("accepted MAC = %s, want %s", client.accept.MAC, requested)
+	}
+}
+
 type testClient struct {
 	conn   quic.Connection
 	stream quic.Stream
@@ -133,6 +159,11 @@ func (c testClient) close() {
 
 func joinTestClient(t *testing.T, ctx context.Context, addr, room string) testClient {
 	t.Helper()
+	return joinTestClientWithMAC(t, ctx, addr, room, "")
+}
+
+func joinTestClientWithMAC(t *testing.T, ctx context.Context, addr, room, requestedMAC string) testClient {
+	t.Helper()
 	conn, err := quic.DialAddr(ctx, addr, testTLSConfig(), nil)
 	if err != nil {
 		t.Fatalf("dial failed: %v", err)
@@ -141,7 +172,7 @@ func joinTestClient(t *testing.T, ctx context.Context, addr, room string) testCl
 	if err != nil {
 		t.Fatalf("open stream failed: %v", err)
 	}
-	join := protocol.JoinRoom{Version: protocol.Version, Room: room}
+	join := protocol.JoinRoom{Version: protocol.Version, Room: room, MAC: requestedMAC}
 	if err := protocol.WriteJSON(stream, protocol.TypeJoinRoom, join); err != nil {
 		t.Fatalf("write join failed: %v", err)
 	}

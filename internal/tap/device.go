@@ -1,6 +1,11 @@
 package tap
 
-import "github.com/songgao/water"
+import (
+	"fmt"
+	"net"
+
+	"github.com/songgao/water"
+)
 
 type DeviceInfo struct {
 	Name       string `json:"name"`
@@ -16,6 +21,17 @@ type Device struct {
 
 func (d *Device) Name() string {
 	return d.iface.Name()
+}
+
+func (d *Device) HardwareAddr() (net.HardwareAddr, error) {
+	iface, err := net.InterfaceByName(d.Name())
+	if err != nil {
+		return nil, err
+	}
+	if len(iface.HardwareAddr) != 6 {
+		return nil, fmt.Errorf("interface %s has no ethernet MAC address", d.Name())
+	}
+	return append(net.HardwareAddr(nil), iface.HardwareAddr...), nil
 }
 
 func (d *Device) Read(p []byte) (int, error) {

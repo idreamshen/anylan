@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net"
 	"net/netip"
 	"strings"
 	"sync"
@@ -66,8 +67,19 @@ func (h Handler) handleStream(ctx context.Context, conn quic.Connection, control
 		rejectAndCloseStream(controlStream, "room is required")
 		return errRejected
 	}
+	var requestedMAC net.HardwareAddr
+	if strings.TrimSpace(join.MAC) != "" {
+		var err error
+		requestedMAC, err = net.ParseMAC(join.MAC)
+		if err != nil {
+			logJoinReject(remote, join.Room, "invalid mac address", err)
+			rejectAndCloseStream(controlStream, "invalid mac address")
+			return errRejected
+		}
+	}
 	peer, err := h.Manager.Join(join.Room, relay.JoinOptions{
-		DisplayName: join.DisplayName,
+		DisplayName:  join.DisplayName,
+		RequestedMAC: requestedMAC,
 	})
 	if err != nil {
 		logJoinReject(remote, join.Room, err.Error(), err)

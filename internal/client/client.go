@@ -294,6 +294,21 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 	defer conn.CloseWithError(0, "")
 	log.Printf("connected server=%s room=%q remote=%s", cfg.Server, cfg.Room, conn.RemoteAddr())
 
+	var device *tap.Device
+	var advertisedMAC string
+	if tap.ShouldAdvertiseMAC() {
+		device, err = tap.Open(cfg.DeviceName)
+		if err != nil {
+			return fatalf("open TAP device: %w", err)
+		}
+		defer device.Close()
+		advertisedMAC, err = tap.AdvertiseMAC(device)
+		if err != nil {
+			return fatalf("read TAP MAC address: %w", err)
+		}
+		log.Printf("using TAP hardware MAC dev=%s mac=%s", device.Name(), advertisedMAC)
+	}
+
 	controlStream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
 		return err
@@ -308,6 +323,7 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 		Version:     protocol.Version,
 		Room:        cfg.Room,
 		DisplayName: cfg.DisplayName,
+		MAC:         advertisedMAC,
 		Nonce:       nonce,
 	}
 	if err := protocol.WriteJSON(controlStream, protocol.TypeJoinRoom, join); err != nil {
@@ -336,11 +352,13 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 	status.joined(accept)
 	log.Printf("join accepted room=%q peer=%s ip=%s mac=%s mtu=%d peers=%d", accept.Room, accept.PeerID, accept.IPv4, accept.MAC, accept.MTU, len(accept.Peers))
 
-	device, err := tap.Open(cfg.DeviceName)
-	if err != nil {
-		return fatalf("open TAP device: %w", err)
+	if device == nil {
+		device, err = tap.Open(cfg.DeviceName)
+		if err != nil {
+			return fatalf("open TAP device: %w", err)
+		}
+		defer device.Close()
 	}
-	defer device.Close()
 
 	if err := tap.Configure(ctx, device.Name(), accept.MAC, accept.CIDR, accept.MTU); err != nil {
 		return fatalf("configure TAP device: %w", err)
