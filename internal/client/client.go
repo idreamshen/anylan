@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/idreamshen/anylan/internal/logmem"
 	"github.com/idreamshen/anylan/internal/protocol"
 	"github.com/idreamshen/anylan/internal/tap"
 	"github.com/idreamshen/anylan/internal/webui"
@@ -35,6 +36,7 @@ type Config struct {
 	InsecureSkipVerify bool
 	WebAddr            string
 	WebToken           string
+	Logs               *logmem.Recorder
 }
 
 type JoinRequest struct {
@@ -53,12 +55,16 @@ func Run(ctx context.Context, cfg Config) error {
 	status := newStatus(cfg)
 	if cfg.WebAddr != "" {
 		go func() {
-			err := webui.Server{
+			server := webui.Server{
 				Addr:     cfg.WebAddr,
 				Title:    "anylan client",
 				Token:    cfg.WebToken,
 				Snapshot: func() any { return status.Snapshot() },
-			}.ListenAndServe(ctx)
+			}
+			if cfg.Logs != nil {
+				server.Logs = func() any { return cfg.Logs.Snapshot() }
+			}
+			err := server.ListenAndServe(ctx)
 			if err != nil && ctx.Err() == nil {
 				log.Printf("web UI error: %v", err)
 			}
@@ -67,12 +73,12 @@ func Run(ctx context.Context, cfg Config) error {
 	return runLoop(ctx, cfg, status)
 }
 
-func RunControl(ctx context.Context, webAddr, webToken string) error {
+func RunControl(ctx context.Context, webAddr, webToken string, logs *logmem.Recorder) error {
 	if webAddr == "" {
 		webAddr = DefaultWebAddr
 	}
 	controller := NewController(ctx)
-	return webui.Server{
+	server := webui.Server{
 		Addr:     webAddr,
 		Title:    "anylan client",
 		Token:    webToken,
@@ -80,7 +86,11 @@ func RunControl(ctx context.Context, webAddr, webToken string) error {
 		Devices:  controller.Devices,
 		Join:     controller.Join,
 		Leave:    controller.Leave,
-	}.ListenAndServe(ctx)
+	}
+	if logs != nil {
+		server.Logs = func() any { return logs.Snapshot() }
+	}
+	return server.ListenAndServe(ctx)
 }
 
 func normalizeConfig(cfg *Config) error {

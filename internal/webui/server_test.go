@@ -45,6 +45,9 @@ func TestHandlersServeIndexAndStatus(t *testing.T) {
 func TestAPIHandlers(t *testing.T) {
 	server := Server{
 		Snapshot: func() any { return map[string]string{"state": "ok"} },
+		Logs: func() any {
+			return []map[string]string{{"message": "hello"}}
+		},
 		Devices: func(context.Context, json.RawMessage) (any, error) {
 			return []map[string]string{{"name": "anylan0"}}, nil
 		},
@@ -80,6 +83,23 @@ func TestAPIHandlers(t *testing.T) {
 	handler.ServeHTTP(leaveRec, leaveReq)
 	if leaveRec.Code != http.StatusOK || !strings.Contains(leaveRec.Body.String(), "left") {
 		t.Fatalf("leave response = %d %s", leaveRec.Code, leaveRec.Body.String())
+	}
+
+	logsReq := httptest.NewRequest(http.MethodGet, "/api/logs", nil)
+	logsRec := httptest.NewRecorder()
+	handler.ServeHTTP(logsRec, logsReq)
+	if logsRec.Code != http.StatusOK || !strings.Contains(logsRec.Body.String(), "hello") {
+		t.Fatalf("logs response = %d %s", logsRec.Code, logsRec.Body.String())
+	}
+}
+
+func TestLogsHandlerIsNotFoundWhenDisabled(t *testing.T) {
+	server := Server{Snapshot: func() any { return nil }}
+	req := httptest.NewRequest(http.MethodGet, "/api/logs", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
 }
 

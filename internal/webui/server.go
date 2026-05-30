@@ -25,6 +25,7 @@ type Server struct {
 	Devices  APIHandler
 	Join     APIHandler
 	Leave    APIHandler
+	Logs     func() any
 }
 
 type APIHandler func(context.Context, json.RawMessage) (any, error)
@@ -45,6 +46,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("/api/devices", s.withAuth(s.handleAPI(http.MethodGet, s.Devices)))
 	mux.HandleFunc("/api/join", s.withAuth(s.handleAPI(http.MethodPost, s.Join)))
 	mux.HandleFunc("/api/leave", s.withAuth(s.handleAPI(http.MethodPost, s.Leave)))
+	mux.HandleFunc("/api/logs", s.withAuth(s.handleLogs))
 	mux.HandleFunc("/assets/", s.withAuth(s.handleAsset))
 	return mux
 }
@@ -124,6 +126,18 @@ func (s Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if err := encoder.Encode(s.Snapshot()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func (s Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if s.Logs == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, s.Logs())
 }
 
 func (s Server) handleAPI(method string, handler APIHandler) http.HandlerFunc {

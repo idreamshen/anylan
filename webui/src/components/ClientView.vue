@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { getJSON, postJSON } from '../api'
+import LogView from './LogView.vue'
 import MetricCard from './MetricCard.vue'
 
 const props = defineProps({
@@ -163,6 +164,7 @@ function time(value) {
       <v-tab value="status">Status</v-tab>
       <v-tab value="peers">Peers</v-tab>
       <v-tab value="connect">Connect</v-tab>
+      <v-tab value="log">Log</v-tab>
     </v-tabs>
 
     <v-window v-model="activeTab">
@@ -231,6 +233,12 @@ function time(value) {
               <v-btn color="error" variant="tonal" :disabled="!busy" @click="leave">Leave</v-btn>
             </v-card-actions>
           </v-form>
+        </v-card-text>
+      </v-window-item>
+
+      <v-window-item value="log">
+        <v-card-text>
+          <LogView />
         </v-card-text>
       </v-window-item>
     </v-window>

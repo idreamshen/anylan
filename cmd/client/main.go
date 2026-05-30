@@ -10,18 +10,20 @@ import (
 	"syscall"
 
 	"github.com/idreamshen/anylan/internal/client"
+	"github.com/idreamshen/anylan/internal/logmem"
 	"github.com/idreamshen/anylan/internal/tap"
 )
 
 func main() {
+	logs := logmem.InstallDefault(logmem.DefaultLimit)
 	if len(os.Args) >= 2 && os.Args[1] == "join" {
-		runJoin()
+		runJoin(logs)
 		return
 	}
-	runControl()
+	runControl(logs)
 }
 
-func runControl() {
+func runControl(logs *logmem.Recorder) {
 	fs := flag.NewFlagSet("anylan-client", flag.ExitOnError)
 	web := fs.String("web", client.DefaultWebAddr, "HTTP WebUI listen address")
 	webToken := fs.String("web-token", "", "bearer token required for the HTTP WebUI")
@@ -35,12 +37,12 @@ func runControl() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := client.RunControl(ctx, *web, *webToken); err != nil && ctx.Err() == nil {
+	if err := client.RunControl(ctx, *web, *webToken, logs); err != nil && ctx.Err() == nil {
 		log.Fatal(err)
 	}
 }
 
-func runJoin() {
+func runJoin(logs *logmem.Recorder) {
 	fs := flag.NewFlagSet("join", flag.ExitOnError)
 	server := fs.String("server", "", "anylan-server address")
 	room := fs.String("room", "", "room code")
@@ -62,6 +64,7 @@ func runJoin() {
 		InsecureSkipVerify: *insecureSkipVerify,
 		WebAddr:            *web,
 		WebToken:           *webToken,
+		Logs:               logs,
 	}
 	if err := client.Run(ctx, cfg); err != nil && ctx.Err() == nil {
 		log.Fatal(err)

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/idreamshen/anylan/internal/control"
+	"github.com/idreamshen/anylan/internal/logmem"
 	"github.com/idreamshen/anylan/internal/protocol"
 	"github.com/idreamshen/anylan/internal/relay"
 	"github.com/idreamshen/anylan/internal/webui"
@@ -34,6 +35,7 @@ type Server struct {
 	MTU             int
 	WebAddr         string
 	WebToken        string
+	Logs            *logmem.Recorder
 }
 
 func (s Server) ListenAndServe(ctx context.Context) error {
@@ -78,12 +80,16 @@ func (s Server) Serve(ctx context.Context, listener *quic.Listener) error {
 	}
 	if s.WebAddr != "" {
 		go func() {
-			err := webui.Server{
+			web := webui.Server{
 				Addr:     s.WebAddr,
 				Title:    "anylan server",
 				Token:    s.WebToken,
 				Snapshot: func() any { return manager.Snapshot() },
-			}.ListenAndServe(ctx)
+			}
+			if s.Logs != nil {
+				web.Logs = func() any { return s.Logs.Snapshot() }
+			}
+			err := web.ListenAndServe(ctx)
 			if err != nil && ctx.Err() == nil {
 				log.Printf("web UI error: %v", err)
 			}

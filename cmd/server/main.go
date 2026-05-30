@@ -7,10 +7,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/idreamshen/anylan/internal/logmem"
 	"github.com/idreamshen/anylan/internal/server"
 )
 
 func main() {
+	logs := logmem.InstallDefault(logmem.DefaultLimit)
 	var (
 		listen          = flag.String("listen", ":4433", "UDP listen address")
 		pool            = flag.String("pool", "10.240.0.0/12", "IPv4 pool for room /24 allocations")
@@ -40,6 +42,7 @@ func main() {
 		MTU:             *mtu,
 		WebAddr:         *web,
 		WebToken:        *webToken,
+		Logs:            logs,
 	}
 	log.Printf("anylan-server listening on %s with pool %s", *listen, parsedPool)
 	if err := srv.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
