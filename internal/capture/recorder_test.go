@@ -7,6 +7,7 @@ import (
 
 func TestRecorderKeepsRecentEvents(t *testing.T) {
 	recorder := NewRecorder(2)
+	recorder.Enable()
 	frame := []byte{
 		0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 		0x02, 0x00, 0x00, 0x00, 0x00, 0x01,
@@ -28,8 +29,37 @@ func TestRecorderKeepsRecentEvents(t *testing.T) {
 	}
 }
 
+func TestRecorderIsDisabledByDefault(t *testing.T) {
+	recorder := NewRecorder(10)
+	recorder.Record(Metadata{Direction: "tx"}, ethernet(0x88b5, []byte("sample")))
+
+	snap := recorder.Snapshot()
+	if snap.Enabled || snap.Count != 0 {
+		t.Fatalf("unexpected disabled snapshot: %#v", snap)
+	}
+}
+
+func TestRecorderEnableDisable(t *testing.T) {
+	recorder := NewRecorder(10)
+	if !recorder.Enable().Enabled {
+		t.Fatal("recorder was not enabled")
+	}
+	recorder.Record(Metadata{Direction: "tx"}, ethernet(0x88b5, []byte("sample")))
+	if snap := recorder.Snapshot(); snap.Count != 1 {
+		t.Fatalf("count while enabled = %d, want 1", snap.Count)
+	}
+	if recorder.Disable().Enabled {
+		t.Fatal("recorder was not disabled")
+	}
+	recorder.Record(Metadata{Direction: "tx"}, ethernet(0x88b5, []byte("sample")))
+	if snap := recorder.Snapshot(); snap.Count != 1 {
+		t.Fatalf("disabled recorder appended event, count = %d", snap.Count)
+	}
+}
+
 func TestRecordSummarizesARPRequest(t *testing.T) {
 	recorder := NewRecorder(10)
+	recorder.Enable()
 	recorder.Record(Metadata{Direction: "tx"}, ethernet(0x0806, []byte{
 		0x00, 0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01,
 		0x02, 0x00, 0x00, 0x00, 0x00, 0x01,
@@ -46,6 +76,7 @@ func TestRecordSummarizesARPRequest(t *testing.T) {
 
 func TestRecordSummarizesIPv4ICMPEcho(t *testing.T) {
 	recorder := NewRecorder(10)
+	recorder.Enable()
 	payload := append(ipv4Header(1, [4]byte{10, 240, 0, 2}, [4]byte{10, 240, 0, 3}), 8, 0, 0, 0)
 	recorder.Record(Metadata{Direction: "tx"}, ethernet(0x0800, payload))
 
@@ -69,6 +100,7 @@ func TestRecordSummarizesIPv4TCPAndUDP(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			recorder := NewRecorder(10)
+			recorder.Enable()
 			payload := append(ipv4Header(tt.proto, [4]byte{10, 240, 0, 2}, [4]byte{10, 240, 0, 3}), tt.ports...)
 			recorder.Record(Metadata{Direction: "tx"}, ethernet(0x0800, payload))
 
@@ -82,6 +114,7 @@ func TestRecordSummarizesIPv4TCPAndUDP(t *testing.T) {
 
 func TestRecordSummarizesUnknownEtherType(t *testing.T) {
 	recorder := NewRecorder(10)
+	recorder.Enable()
 	recorder.Record(Metadata{Direction: "tx"}, ethernet(0x88b5, []byte("sample")))
 
 	event := recorder.Snapshot().Events[0]
@@ -92,6 +125,7 @@ func TestRecordSummarizesUnknownEtherType(t *testing.T) {
 
 func TestRecordParsesVLANInnerEtherType(t *testing.T) {
 	recorder := NewRecorder(10)
+	recorder.Enable()
 	frame := []byte{
 		0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 		0x02, 0x00, 0x00, 0x00, 0x00, 0x01,
@@ -109,6 +143,7 @@ func TestRecordParsesVLANInnerEtherType(t *testing.T) {
 
 func TestRecordMarksShortFrameInvalid(t *testing.T) {
 	recorder := NewRecorder(10)
+	recorder.Enable()
 	recorder.Record(Metadata{Direction: "rx"}, []byte{1, 2, 3})
 
 	event := recorder.Snapshot().Events[0]

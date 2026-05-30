@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"log"
@@ -98,6 +99,14 @@ func (s Server) Serve(ctx context.Context, listener *quic.Listener) error {
 			}
 			if captures != nil {
 				web.Capture = func() any { return captures.Snapshot() }
+				web.CaptureEnable = func(context.Context, json.RawMessage) (any, error) {
+					log.Printf("packet capture enabled")
+					return captures.Enable(), nil
+				}
+				web.CaptureDisable = func(context.Context, json.RawMessage) (any, error) {
+					log.Printf("packet capture disabled")
+					return captures.Disable(), nil
+				}
 			}
 			err := web.ListenAndServe(ctx)
 			if err != nil && ctx.Err() == nil {

@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 const DefaultLimit = 100
 
 type Recorder struct {
+	enabled atomic.Bool
 	mu      sync.Mutex
 	limit   int
 	nextSeq uint64
@@ -42,6 +44,7 @@ type Event struct {
 
 type Snapshot struct {
 	GeneratedAt time.Time `json:"generated_at"`
+	Enabled     bool      `json:"enabled"`
 	Limit       int       `json:"limit"`
 	Count       int       `json:"count"`
 	Events      []Event   `json:"events"`
@@ -61,8 +64,28 @@ func NewRecorder(limit int) *Recorder {
 	return &Recorder{limit: limit}
 }
 
-func (r *Recorder) Record(meta Metadata, frame []byte) {
+func (r *Recorder) Enable() Snapshot {
 	if r == nil {
+		return Snapshot{GeneratedAt: time.Now(), Limit: DefaultLimit}
+	}
+	r.enabled.Store(true)
+	return r.Snapshot()
+}
+
+func (r *Recorder) Disable() Snapshot {
+	if r == nil {
+		return Snapshot{GeneratedAt: time.Now(), Limit: DefaultLimit}
+	}
+	r.enabled.Store(false)
+	return r.Snapshot()
+}
+
+func (r *Recorder) Enabled() bool {
+	return r != nil && r.enabled.Load()
+}
+
+func (r *Recorder) Record(meta Metadata, frame []byte) {
+	if r == nil || !r.enabled.Load() {
 		return
 	}
 	event := parseFrame(frame)
@@ -94,6 +117,7 @@ func (r *Recorder) Snapshot() Snapshot {
 	copy(events, r.events)
 	return Snapshot{
 		GeneratedAt: time.Now(),
+		Enabled:     r.enabled.Load(),
 		Limit:       r.limit,
 		Count:       len(events),
 		Events:      events,

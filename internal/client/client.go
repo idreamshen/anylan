@@ -71,6 +71,8 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 			if cfg.Capture != nil {
 				server.Capture = func() any { return cfg.Capture.Snapshot() }
+				server.CaptureEnable = captureEnableHandler(cfg.Capture)
+				server.CaptureDisable = captureDisableHandler(cfg.Capture)
 			}
 			err := server.ListenAndServe(ctx)
 			if err != nil && ctx.Err() == nil {
@@ -101,7 +103,23 @@ func RunControl(ctx context.Context, webAddr, webToken string, logs *logmem.Reco
 		server.Logs = func() any { return logs.Snapshot() }
 	}
 	server.Capture = func() any { return captures.Snapshot() }
+	server.CaptureEnable = captureEnableHandler(captures)
+	server.CaptureDisable = captureDisableHandler(captures)
 	return server.ListenAndServe(ctx)
+}
+
+func captureEnableHandler(recorder *capture.Recorder) webui.APIHandler {
+	return func(context.Context, json.RawMessage) (any, error) {
+		log.Printf("packet capture enabled")
+		return recorder.Enable(), nil
+	}
+}
+
+func captureDisableHandler(recorder *capture.Recorder) webui.APIHandler {
+	return func(context.Context, json.RawMessage) (any, error) {
+		log.Printf("packet capture disabled")
+		return recorder.Disable(), nil
+	}
 }
 
 func normalizeConfig(cfg *Config) error {

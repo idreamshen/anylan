@@ -51,6 +51,12 @@ func TestAPIHandlers(t *testing.T) {
 		Capture: func() any {
 			return map[string]int{"count": 1}
 		},
+		CaptureEnable: func(context.Context, json.RawMessage) (any, error) {
+			return map[string]bool{"enabled": true}, nil
+		},
+		CaptureDisable: func(context.Context, json.RawMessage) (any, error) {
+			return map[string]bool{"enabled": false}, nil
+		},
 		Devices: func(context.Context, json.RawMessage) (any, error) {
 			return []map[string]string{{"name": "anylan0"}}, nil
 		},
@@ -100,6 +106,20 @@ func TestAPIHandlers(t *testing.T) {
 	handler.ServeHTTP(captureRec, captureReq)
 	if captureRec.Code != http.StatusOK || !strings.Contains(captureRec.Body.String(), "count") {
 		t.Fatalf("capture response = %d %s", captureRec.Code, captureRec.Body.String())
+	}
+
+	enableReq := httptest.NewRequest(http.MethodPost, "/api/capture/enable", strings.NewReader(`{}`))
+	enableRec := httptest.NewRecorder()
+	handler.ServeHTTP(enableRec, enableReq)
+	if enableRec.Code != http.StatusOK || !strings.Contains(enableRec.Body.String(), "true") {
+		t.Fatalf("capture enable response = %d %s", enableRec.Code, enableRec.Body.String())
+	}
+
+	disableReq := httptest.NewRequest(http.MethodPost, "/api/capture/disable", strings.NewReader(`{}`))
+	disableRec := httptest.NewRecorder()
+	handler.ServeHTTP(disableRec, disableReq)
+	if disableRec.Code != http.StatusOK || !strings.Contains(disableRec.Body.String(), "false") {
+		t.Fatalf("capture disable response = %d %s", disableRec.Code, disableRec.Body.String())
 	}
 }
 

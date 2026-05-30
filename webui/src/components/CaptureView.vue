@@ -1,9 +1,10 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { getJSON } from '../api'
+import { getJSON, postJSON } from '../api'
 
 const error = ref('')
-const snapshot = ref({ events: [], count: 0, limit: 0 })
+const busy = ref(false)
+const snapshot = ref({ enabled: false, events: [], count: 0, limit: 0 })
 let timer = 0
 
 const headers = [
@@ -37,6 +38,18 @@ async function refresh() {
   }
 }
 
+async function setEnabled(enabled) {
+  try {
+    busy.value = true
+    error.value = ''
+    snapshot.value = await postJSON(enabled ? '/api/capture/enable' : '/api/capture/disable', {})
+  } catch (err) {
+    error.value = String(err.message || err)
+  } finally {
+    busy.value = false
+  }
+}
+
 function time(value) {
   if (!value) return '-'
   return new Date(value).toLocaleTimeString()
@@ -62,8 +75,23 @@ function peerLabel(item) {
   </v-alert>
 
   <v-alert type="info" variant="tonal" class="mb-4">
-    Showing the latest {{ snapshot.count || 0 }} packet metadata events. Payload bytes are not stored.
+    Packet metadata capture is {{ snapshot.enabled ? 'enabled' : 'disabled' }}. Payload bytes are not stored.
   </v-alert>
+
+  <div class="d-flex flex-wrap align-center ga-3 mb-4">
+    <v-chip :color="snapshot.enabled ? 'success' : 'default'" variant="tonal">
+      {{ snapshot.enabled ? 'Enabled' : 'Disabled' }}
+    </v-chip>
+    <v-btn color="primary" variant="flat" :loading="busy" :disabled="snapshot.enabled" @click="setEnabled(true)">
+      Enable Capture
+    </v-btn>
+    <v-btn color="error" variant="tonal" :loading="busy" :disabled="!snapshot.enabled" @click="setEnabled(false)">
+      Disable Capture
+    </v-btn>
+    <span class="text-caption text-medium-emphasis">
+      Showing latest {{ snapshot.count || 0 }} of {{ snapshot.limit || 0 }} metadata events.
+    </span>
+  </div>
 
   <v-data-table :headers="headers" :items="rows" item-value="seq" density="compact">
     <template #item.time="{ item }">{{ time(item.time) }}</template>
