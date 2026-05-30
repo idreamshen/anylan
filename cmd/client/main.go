@@ -29,7 +29,7 @@ func runControl(logs *logmem.Recorder) {
 	webToken := fs.String("web-token", "", "bearer token required for the HTTP WebUI")
 	_ = fs.Parse(os.Args[1:])
 	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: anylan-client [--web 127.0.0.1:8081] [--web-token token]")
+		fmt.Fprintln(os.Stderr, "usage: anylan-client [--web 127.0.0.1:18081] [--web-token token]")
 		fmt.Fprintln(os.Stderr, "       anylan-client join --server host:4433 --room room-code [--dev tap-device]")
 		os.Exit(2)
 	}

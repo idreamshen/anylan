@@ -54,7 +54,7 @@ On a machine reachable by all players:
 For quick testing without real TLS certificates:
 
 ```bash
-./out/anylan-server --listen :4433 --insecure-dev-cert --web 127.0.0.1:8080
+./out/anylan-server --listen :4433 --insecure-dev-cert --web 127.0.0.1:18080
 ```
 
 The `--web` flag is optional but recommended: it exposes a status page at the
@@ -66,7 +66,7 @@ the status page is reachable by anyone else.
 Pick any room name. Everyone who uses the same name ends up on the same virtual
 LAN.
 
-Start the client control WebUI, then open <http://127.0.0.1:8081> and enter the
+Start the client control WebUI, then open <http://127.0.0.1:18081> and enter the
 server host, server port, room code, display name, and virtual adapter.
 
 **Linux:**
@@ -84,7 +84,7 @@ sudo ./out/anylan-client
 To bind the WebUI to another address or port:
 
 ```bash
-sudo ./out/anylan-client --web 0.0.0.0:8081 --web-token change-me
+sudo ./out/anylan-client --web 0.0.0.0:18081 --web-token change-me
 ```
 
 The old command-line join mode is still available for scripts:
@@ -105,7 +105,7 @@ stop the client and clean up.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--web` | `127.0.0.1:8081` | Client control WebUI listen address |
+| `--web` | `127.0.0.1:18081` | Client control WebUI listen address |
 | `--web-token` | | Bearer token required for the client WebUI |
 
 The `join` subcommand accepts these options:
@@ -117,7 +117,7 @@ The `join` subcommand accepts these options:
 | `--name` | | Display name shown to other players |
 | `--dev` | `anylan0` | Virtual network adapter name (on Windows, the TAP adapter friendly name, e.g. `"Ethernet 3"`) |
 | `--insecure-skip-verify` | `false` | Skip TLS certificate check (for testing only) |
-| `--web` | | Start a local HTTP status page, e.g. `127.0.0.1:8081` |
+| `--web` | | Start a local HTTP status page, e.g. `127.0.0.1:18081` |
 | `--web-token` | | Bearer token required for the HTTP status page |
 
 ## Server Options
@@ -130,7 +130,7 @@ The `join` subcommand accepts these options:
 | `--insecure-dev-cert` | `false` | Use a throwaway self-signed certificate |
 | `--pool` | `10.240.0.0/12` | IP pool for virtual addresses |
 | `--mtu` | `1300` | MTU announced to clients |
-| `--web` | | Start a local HTTP status page, e.g. `127.0.0.1:8080` |
+| `--web` | | Start a local HTTP status page, e.g. `127.0.0.1:18080` |
 | `--web-token` | | Bearer token required for the HTTP status page |
 
 ## Troubleshooting
