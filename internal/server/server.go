@@ -157,7 +157,7 @@ func (s Server) tlsConfig() (*tls.Config, error) {
 	case s.InsecureDevCert:
 		cert, err = devCertificate()
 	default:
-		return nil, fmt.Errorf("provide --tls-cert/--tls-key or use --insecure-dev-cert")
+		cert, err = devCertificate()
 	}
 	if err != nil {
 		return nil, err
