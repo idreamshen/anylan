@@ -1,0 +1,8 @@
+.git/
+.gitignore
+out/
+webui/node_modules/
+AGENTS.md
+Makefile
+README.md
+scripts/
