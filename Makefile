@@ -1,11 +1,15 @@
 OUT_DIR := out
 
-.PHONY: all build build-client build-server build-windows test clean
+.PHONY: all build webui-build build-client build-server build-windows test clean
 
 all: build
 
 ## build both binaries for the current platform
-build: build-client build-server
+build: webui-build build-client build-server
+
+webui-build:
+	npm --prefix webui ci
+	npm --prefix webui run build
 
 build-client:
 	go build -o $(OUT_DIR)/anylan-client ./cmd/client

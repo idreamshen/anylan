@@ -2,6 +2,14 @@ package tap
 
 import "github.com/songgao/water"
 
+type DeviceInfo struct {
+	Name       string `json:"name"`
+	Display    string `json:"display"`
+	Default    bool   `json:"default,omitempty"`
+	Virtual    bool   `json:"virtual,omitempty"`
+	Selectable bool   `json:"selectable"`
+}
+
 type Device struct {
 	iface *water.Interface
 }

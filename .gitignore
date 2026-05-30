@@ -1,2 +1,3 @@
 out/
 /.agent-shell/
+webui/node_modules/

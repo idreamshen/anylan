@@ -4,24 +4,49 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"html/template"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
-//go:embed static/*
-var staticFiles embed.FS
-
-var indexTemplate = template.Must(template.ParseFS(staticFiles, "static/index.html"))
+//go:embed dist/* dist/assets/*
+var distFiles embed.FS
 
 type Server struct {
 	Addr     string
 	Title    string
 	Token    string
 	Snapshot func() any
+	Devices  APIHandler
+	Join     APIHandler
+	Leave    APIHandler
+}
+
+type APIHandler func(context.Context, json.RawMessage) (any, error)
+
+type APIError struct {
+	Status  int
+	Message string
+}
+
+func (e APIError) Error() string {
+	return e.Message
+}
+
+func (s Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.withAuth(s.handleIndex))
+	mux.HandleFunc("/api/status", s.withAuth(s.handleStatus))
+	mux.HandleFunc("/api/devices", s.withAuth(s.handleAPI(http.MethodGet, s.Devices)))
+	mux.HandleFunc("/api/join", s.withAuth(s.handleAPI(http.MethodPost, s.Join)))
+	mux.HandleFunc("/api/leave", s.withAuth(s.handleAPI(http.MethodPost, s.Leave)))
+	mux.HandleFunc("/assets/", s.withAuth(s.handleAsset))
+	return mux
 }
 
 func (s Server) ListenAndServe(ctx context.Context) error {
@@ -32,14 +57,9 @@ func (s Server) ListenAndServe(ctx context.Context) error {
 		return fmt.Errorf("web UI snapshot function is required")
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.withAuth(s.handleIndex))
-	mux.HandleFunc("/api/status", s.withAuth(s.handleStatus))
-	mux.Handle("/static/", s.withAuth(http.FileServer(http.FS(staticFiles)).ServeHTTP))
-
 	server := &http.Server{
 		Addr:              s.Addr,
-		Handler:           mux,
+		Handler:           s.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	errCh := make(chan error, 1)
@@ -72,18 +92,90 @@ func (s Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := indexTemplate.Execute(w, pageData{Title: s.Title}); err != nil {
+	contents, err := distFiles.ReadFile("dist/index.html")
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+	_, _ = w.Write(contents)
+}
+
+func (s Server) handleAsset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/")
+	if name == r.URL.Path || strings.Contains(name, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFileFS(w, r, distFiles, "dist/"+name)
 }
 
 func (s Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(s.Snapshot()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func (s Server) handleAPI(method string, handler APIHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if handler == nil {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != method {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64*1024))
+		if err != nil {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		result, err := handler(r.Context(), json.RawMessage(payload))
+		if err != nil {
+			writeAPIError(w, err)
+			return
+		}
+		writeJSON(w, result)
+	}
+}
+
+func writeJSON(w http.ResponseWriter, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	if value == nil {
+		value = map[string]bool{"ok": true}
+	}
+	if err := encoder.Encode(value); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func writeAPIError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	message := err.Error()
+	var apiErr APIError
+	if errors.As(err, &apiErr) {
+		status = apiErr.Status
+		if status == 0 {
+			status = http.StatusInternalServerError
+		}
+		message = apiErr.Message
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 func (s Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -106,8 +198,4 @@ func displayAddr(addr string) string {
 		host = "127.0.0.1"
 	}
 	return net.JoinHostPort(host, port)
-}
-
-type pageData struct {
-	Title string
 }

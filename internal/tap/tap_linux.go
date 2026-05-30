@@ -5,7 +5,10 @@ package tap
 import (
 	"context"
 	"fmt"
+	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 
 	"github.com/songgao/water"
@@ -30,6 +33,52 @@ func Open(name string) (*Device, error) {
 		return nil, err
 	}
 	return &Device{iface: iface}, nil
+}
+
+func ListDevices() ([]DeviceInfo, error) {
+	defaultName := DefaultDeviceName()
+	seen := map[string]bool{}
+	devices := []DeviceInfo{{
+		Name:       defaultName,
+		Display:    defaultName + " (default)",
+		Default:    true,
+		Virtual:    true,
+		Selectable: true,
+	}}
+	seen[defaultName] = true
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return devices, err
+	}
+	for _, iface := range ifaces {
+		if seen[iface.Name] {
+			continue
+		}
+		virtual, selectable := linuxInterfaceKind(iface.Name)
+		devices = append(devices, DeviceInfo{
+			Name:       iface.Name,
+			Display:    iface.Name,
+			Virtual:    virtual,
+			Selectable: selectable,
+		})
+		seen[iface.Name] = true
+	}
+	return devices, nil
+}
+
+func linuxInterfaceKind(name string) (bool, bool) {
+	if name == "" {
+		return false, false
+	}
+	if _, err := os.Stat(filepath.Join("/sys/class/net", name, "tun_flags")); err == nil {
+		return true, true
+	}
+	if target, err := os.Readlink(filepath.Join("/sys/class/net", name)); err == nil {
+		virtual := filepath.IsAbs(target) && filepath.Base(filepath.Dir(target)) == "virtual" || filepath.Base(filepath.Dir(filepath.Dir(target))) == "virtual"
+		return virtual, false
+	}
+	return false, false
 }
 
 func Configure(ctx context.Context, name, mac, cidr string, mtu int) error {

@@ -5,6 +5,7 @@ package tap
 import (
 	"context"
 	"fmt"
+	"net"
 	"os/exec"
 	"strconv"
 
@@ -38,6 +39,28 @@ func Open(name string) (*Device, error) {
 		return &Device{iface: iface}, nil
 	}
 	return nil, fmt.Errorf("open Windows TAP adapter failed: %w; install an OpenVPN/tap-windows6 compatible TAP driver and run anylan-client from an Administrator shell", lastErr)
+}
+
+func ListDevices() ([]DeviceInfo, error) {
+	devices := []DeviceInfo{{
+		Name:       "",
+		Display:    "Auto-detect TAP adapter",
+		Default:    true,
+		Virtual:    true,
+		Selectable: true,
+	}}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return devices, err
+	}
+	for _, iface := range ifaces {
+		devices = append(devices, DeviceInfo{
+			Name:       iface.Name,
+			Display:    iface.Name,
+			Selectable: true,
+		})
+	}
+	return devices, nil
 }
 
 func Configure(ctx context.Context, name, _ string, cidr string, mtu int) error {

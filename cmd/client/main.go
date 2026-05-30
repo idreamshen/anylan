@@ -14,11 +14,33 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] != "join" {
-		fmt.Fprintln(os.Stderr, "usage: anylan-client join --server host:4433 --room room-code [--dev tap-device]")
+	if len(os.Args) >= 2 && os.Args[1] == "join" {
+		runJoin()
+		return
+	}
+	runControl()
+}
+
+func runControl() {
+	fs := flag.NewFlagSet("anylan-client", flag.ExitOnError)
+	web := fs.String("web", client.DefaultWebAddr, "HTTP WebUI listen address")
+	webToken := fs.String("web-token", "", "bearer token required for the HTTP WebUI")
+	_ = fs.Parse(os.Args[1:])
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: anylan-client [--web 127.0.0.1:8081] [--web-token token]")
+		fmt.Fprintln(os.Stderr, "       anylan-client join --server host:4433 --room room-code [--dev tap-device]")
 		os.Exit(2)
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	if err := client.RunControl(ctx, *web, *webToken); err != nil && ctx.Err() == nil {
+		log.Fatal(err)
+	}
+}
+
+func runJoin() {
 	fs := flag.NewFlagSet("join", flag.ExitOnError)
 	server := fs.String("server", "", "anylan-server address")
 	room := fs.String("room", "", "room code")

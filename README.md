@@ -66,12 +66,13 @@ the status page is reachable by anyone else.
 Pick any room name. Everyone who uses the same name ends up on the same virtual
 LAN.
 
+Start the client control WebUI, then open <http://127.0.0.1:8081> and enter the
+server address, room code, display name, and virtual adapter.
+
 **Linux:**
 
 ```bash
-sudo ./out/anylan-client join \
-  --server your-server-ip:4433 \
-  --room my-room
+sudo ./out/anylan-client
 ```
 
 For a server started with `--room-key`, clients must pass the same
@@ -80,9 +81,19 @@ For a server started with `--room-key`, clients must pass the same
 **Windows** (run as Administrator):
 
 ```powershell
-.\out\anylan-client.exe join `
-  --server your-server-ip:4433 `
-  --room my-room
+.\out\anylan-client.exe
+```
+
+To bind the WebUI to another address or port:
+
+```bash
+sudo ./out/anylan-client --web 0.0.0.0:8081 --web-token change-me
+```
+
+The old command-line join mode is still available for scripts:
+
+```bash
+sudo ./out/anylan-client join --server your-server-ip:4433 --room my-room
 ```
 
 Each client gets a virtual IP like `10.240.x.y`. Once everyone has joined,
@@ -90,9 +101,17 @@ launch your game and look for LAN/local games -- you should see each other.
 
 ### 3. Stop
 
-Press `Ctrl-C` in the client terminal to leave the room and clean up.
+Click **Leave** in the client WebUI, or press `Ctrl-C` in the client terminal to
+stop the client and clean up.
 
 ## Client Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--web` | `127.0.0.1:8081` | Client control WebUI listen address |
+| `--web-token` | | Bearer token required for the client WebUI |
+
+The `join` subcommand accepts these options:
 
 | Flag | Default | Description |
 |---|---|---|

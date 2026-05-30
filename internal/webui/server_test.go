@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,11 +23,8 @@ func TestHandlersServeIndexAndStatus(t *testing.T) {
 	if indexRec.Code != http.StatusOK {
 		t.Fatalf("index status = %d", indexRec.Code)
 	}
-	if !strings.Contains(indexRec.Body.String(), "test status") {
-		t.Fatal("index did not include title")
-	}
-	if !strings.Contains(indexRec.Body.String(), `/static/app.js`) {
-		t.Fatal("index did not include app script")
+	if !strings.Contains(indexRec.Body.String(), `<div id="app"`) {
+		t.Fatal("index did not include app mount point")
 	}
 
 	statusReq := httptest.NewRequest(http.MethodGet, "/api/status", nil)
@@ -41,6 +39,65 @@ func TestHandlersServeIndexAndStatus(t *testing.T) {
 	}
 	if body["state"] != "ok" {
 		t.Fatalf("state = %q", body["state"])
+	}
+}
+
+func TestAPIHandlers(t *testing.T) {
+	server := Server{
+		Snapshot: func() any { return map[string]string{"state": "ok"} },
+		Devices: func(context.Context, json.RawMessage) (any, error) {
+			return []map[string]string{{"name": "anylan0"}}, nil
+		},
+		Join: func(_ context.Context, payload json.RawMessage) (any, error) {
+			var body map[string]string
+			if err := json.Unmarshal(payload, &body); err != nil {
+				return nil, err
+			}
+			return map[string]string{"room": body["room"]}, nil
+		},
+		Leave: func(context.Context, json.RawMessage) (any, error) {
+			return map[string]bool{"left": true}, nil
+		},
+	}
+	handler := server.Handler()
+
+	devReq := httptest.NewRequest(http.MethodGet, "/api/devices", nil)
+	devRec := httptest.NewRecorder()
+	handler.ServeHTTP(devRec, devReq)
+	if devRec.Code != http.StatusOK || !strings.Contains(devRec.Body.String(), "anylan0") {
+		t.Fatalf("devices response = %d %s", devRec.Code, devRec.Body.String())
+	}
+
+	joinReq := httptest.NewRequest(http.MethodPost, "/api/join", strings.NewReader(`{"room":"test"}`))
+	joinRec := httptest.NewRecorder()
+	handler.ServeHTTP(joinRec, joinReq)
+	if joinRec.Code != http.StatusOK || !strings.Contains(joinRec.Body.String(), "test") {
+		t.Fatalf("join response = %d %s", joinRec.Code, joinRec.Body.String())
+	}
+
+	leaveReq := httptest.NewRequest(http.MethodPost, "/api/leave", strings.NewReader(`{}`))
+	leaveRec := httptest.NewRecorder()
+	handler.ServeHTTP(leaveRec, leaveReq)
+	if leaveRec.Code != http.StatusOK || !strings.Contains(leaveRec.Body.String(), "left") {
+		t.Fatalf("leave response = %d %s", leaveRec.Code, leaveRec.Body.String())
+	}
+}
+
+func TestAPIHandlerReportsAPIErrors(t *testing.T) {
+	server := Server{
+		Snapshot: func() any { return nil },
+		Join: func(context.Context, json.RawMessage) (any, error) {
+			return nil, APIError{Status: http.StatusConflict, Message: "already joined"}
+		},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/join", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+	if !strings.Contains(rec.Body.String(), "already joined") {
+		t.Fatalf("body = %s", rec.Body.String())
 	}
 }
 

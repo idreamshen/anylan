@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,8 @@ import (
 
 const alpn = "anylan-mvp"
 
+const DefaultWebAddr = "127.0.0.1:8081"
+
 type Config struct {
 	Server             string
 	Room               string
@@ -35,16 +38,18 @@ type Config struct {
 	WebToken           string
 }
 
+type JoinRequest struct {
+	Server             string `json:"server"`
+	Room               string `json:"room"`
+	RoomKey            string `json:"room_key"`
+	DisplayName        string `json:"display_name"`
+	DeviceName         string `json:"device_name"`
+	InsecureSkipVerify bool   `json:"insecure_skip_verify"`
+}
+
 func Run(ctx context.Context, cfg Config) error {
-	if cfg.Server == "" {
-		return fmt.Errorf("server is required")
-	}
-	cfg.Room = strings.TrimSpace(cfg.Room)
-	if cfg.Room == "" {
-		return fmt.Errorf("room is required")
-	}
-	if cfg.DeviceName == "" {
-		cfg.DeviceName = tap.DefaultDeviceName()
+	if err := normalizeConfig(&cfg); err != nil {
+		return err
 	}
 
 	status := newStatus(cfg)
@@ -61,6 +66,140 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 		}()
 	}
+	return runLoop(ctx, cfg, status)
+}
+
+func RunControl(ctx context.Context, webAddr, webToken string) error {
+	if webAddr == "" {
+		webAddr = DefaultWebAddr
+	}
+	controller := NewController(ctx)
+	return webui.Server{
+		Addr:     webAddr,
+		Title:    "anylan client",
+		Token:    webToken,
+		Snapshot: func() any { return controller.Snapshot() },
+		Devices:  controller.Devices,
+		Join:     controller.Join,
+		Leave:    controller.Leave,
+	}.ListenAndServe(ctx)
+}
+
+func normalizeConfig(cfg *Config) error {
+	cfg.Server = strings.TrimSpace(cfg.Server)
+	if cfg.Server == "" {
+		return fmt.Errorf("server is required")
+	}
+	cfg.Room = strings.TrimSpace(cfg.Room)
+	if cfg.Room == "" {
+		return fmt.Errorf("room is required")
+	}
+	cfg.RoomKey = strings.TrimSpace(cfg.RoomKey)
+	cfg.DisplayName = strings.TrimSpace(cfg.DisplayName)
+	cfg.DeviceName = strings.TrimSpace(cfg.DeviceName)
+	if cfg.DeviceName == "" {
+		cfg.DeviceName = tap.DefaultDeviceName()
+	}
+	return nil
+}
+
+func configFromJoinRequest(req JoinRequest) Config {
+	return Config{
+		Server:             req.Server,
+		Room:               req.Room,
+		RoomKey:            req.RoomKey,
+		DisplayName:        req.DisplayName,
+		DeviceName:         req.DeviceName,
+		InsecureSkipVerify: req.InsecureSkipVerify,
+	}
+}
+
+type Controller struct {
+	ctx    context.Context
+	mu     sync.Mutex
+	status *Status
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func NewController(ctx context.Context) *Controller {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cfg := Config{DeviceName: tap.DefaultDeviceName()}
+	return &Controller{ctx: ctx, status: newIdleStatus(cfg)}
+}
+
+func (c *Controller) Snapshot() Snapshot {
+	return c.status.Snapshot()
+}
+
+func (c *Controller) Devices(context.Context, json.RawMessage) (any, error) {
+	devices, err := tap.ListDevices()
+	if err != nil {
+		return nil, err
+	}
+	return devices, nil
+}
+
+func (c *Controller) Join(_ context.Context, payload json.RawMessage) (any, error) {
+	var req JoinRequest
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return nil, webui.APIError{Status: http.StatusBadRequest, Message: "invalid join request"}
+		}
+	}
+	cfg := configFromJoinRequest(req)
+	if err := normalizeConfig(&cfg); err != nil {
+		return nil, webui.APIError{Status: http.StatusBadRequest, Message: err.Error()}
+	}
+
+	c.mu.Lock()
+	if c.cancel != nil {
+		c.mu.Unlock()
+		return nil, webui.APIError{Status: http.StatusConflict, Message: "already joined; leave the current room first"}
+	}
+	sessionCtx, cancel := context.WithCancel(c.ctx)
+	done := make(chan struct{})
+	c.cancel = cancel
+	c.done = done
+	c.status.startSession(cfg)
+	c.mu.Unlock()
+
+	go func() {
+		defer close(done)
+		err := runLoop(sessionCtx, cfg, c.status)
+		c.mu.Lock()
+		if c.done == done {
+			c.cancel = nil
+			c.done = nil
+		}
+		c.mu.Unlock()
+		if sessionCtx.Err() != nil {
+			c.status.endSession(nil, "idle")
+			return
+		}
+		if err != nil {
+			log.Printf("client session stopped: %v", err)
+		}
+	}()
+
+	return c.status.Snapshot(), nil
+}
+
+func (c *Controller) Leave(context.Context, json.RawMessage) (any, error) {
+	c.mu.Lock()
+	cancel := c.cancel
+	c.mu.Unlock()
+	if cancel == nil {
+		return c.status.Snapshot(), nil
+	}
+	c.status.setState("leaving")
+	cancel()
+	return c.status.Snapshot(), nil
+}
+
+func runLoop(ctx context.Context, cfg Config, status *Status) error {
 
 	backoff := time.Second
 	for {
@@ -182,10 +321,13 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 type Status struct {
 	mu sync.Mutex
 
-	server    string
-	room      string
-	state     string
-	lastError string
+	server             string
+	room               string
+	displayName        string
+	deviceName         string
+	insecureSkipVerify bool
+	state              string
+	lastError          string
 
 	peerID        string
 	ipv4          string
@@ -205,33 +347,71 @@ type Status struct {
 }
 
 type Snapshot struct {
-	GeneratedAt   time.Time           `json:"generated_at"`
-	Server        string              `json:"server"`
-	Room          string              `json:"room"`
-	State         string              `json:"state"`
-	LastError     string              `json:"last_error,omitempty"`
-	PeerID        string              `json:"peer_id,omitempty"`
-	IPv4          string              `json:"ipv4,omitempty"`
-	CIDR          string              `json:"cidr,omitempty"`
-	MAC           string              `json:"mac,omitempty"`
-	MTU           int                 `json:"mtu,omitempty"`
-	JoinedAt      time.Time           `json:"joined_at,omitempty"`
-	RoomCreatedAt time.Time           `json:"room_created_at,omitempty"`
-	Peers         []protocol.PeerInfo `json:"peers,omitempty"`
-	RxBytes       uint64              `json:"rx_bytes"`
-	RxFrames      uint64              `json:"rx_frames"`
-	TxBytes       uint64              `json:"tx_bytes"`
-	TxFrames      uint64              `json:"tx_frames"`
-	Reconnects    uint64              `json:"reconnects"`
+	GeneratedAt        time.Time           `json:"generated_at"`
+	Server             string              `json:"server"`
+	Room               string              `json:"room"`
+	DisplayName        string              `json:"display_name,omitempty"`
+	DeviceName         string              `json:"device_name,omitempty"`
+	InsecureSkipVerify bool                `json:"insecure_skip_verify"`
+	State              string              `json:"state"`
+	LastError          string              `json:"last_error,omitempty"`
+	PeerID             string              `json:"peer_id,omitempty"`
+	IPv4               string              `json:"ipv4,omitempty"`
+	CIDR               string              `json:"cidr,omitempty"`
+	MAC                string              `json:"mac,omitempty"`
+	MTU                int                 `json:"mtu,omitempty"`
+	JoinedAt           time.Time           `json:"joined_at,omitempty"`
+	RoomCreatedAt      time.Time           `json:"room_created_at,omitempty"`
+	Peers              []protocol.PeerInfo `json:"peers,omitempty"`
+	RxBytes            uint64              `json:"rx_bytes"`
+	RxFrames           uint64              `json:"rx_frames"`
+	TxBytes            uint64              `json:"tx_bytes"`
+	TxFrames           uint64              `json:"tx_frames"`
+	Reconnects         uint64              `json:"reconnects"`
 }
 
 func newStatus(cfg Config) *Status {
 	return &Status{
-		server:    cfg.Server,
-		room:      cfg.Room,
-		state:     "starting",
-		updatedAt: time.Now(),
+		server:             cfg.Server,
+		room:               cfg.Room,
+		displayName:        cfg.DisplayName,
+		deviceName:         cfg.DeviceName,
+		insecureSkipVerify: cfg.InsecureSkipVerify,
+		state:              "starting",
+		updatedAt:          time.Now(),
 	}
+}
+
+func newIdleStatus(cfg Config) *Status {
+	status := newStatus(cfg)
+	status.state = "idle"
+	return status
+}
+
+func (s *Status) startSession(cfg Config) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.server = cfg.Server
+	s.room = cfg.Room
+	s.displayName = cfg.DisplayName
+	s.deviceName = cfg.DeviceName
+	s.insecureSkipVerify = cfg.InsecureSkipVerify
+	s.state = "starting"
+	s.lastError = ""
+	s.peerID = ""
+	s.ipv4 = ""
+	s.cidr = ""
+	s.mac = ""
+	s.mtu = 0
+	s.joinedAt = time.Time{}
+	s.roomCreatedAt = time.Time{}
+	s.peers = nil
+	s.rxBytes.Store(0)
+	s.rxFrames.Store(0)
+	s.txBytes.Store(0)
+	s.txFrames.Store(0)
+	s.reconnects.Store(0)
+	s.updatedAt = time.Now()
 }
 
 func (s *Status) setState(state string) {
@@ -271,6 +451,13 @@ func (s *Status) endSession(err error, state string) {
 	if err != nil {
 		s.lastError = err.Error()
 	}
+	s.peerID = ""
+	s.ipv4 = ""
+	s.cidr = ""
+	s.mac = ""
+	s.mtu = 0
+	s.joinedAt = time.Time{}
+	s.roomCreatedAt = time.Time{}
 	s.peers = nil
 	s.updatedAt = time.Now()
 }
@@ -310,24 +497,27 @@ func (s *Status) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return Snapshot{
-		GeneratedAt:   time.Now(),
-		Server:        s.server,
-		Room:          s.room,
-		State:         s.state,
-		LastError:     s.lastError,
-		PeerID:        s.peerID,
-		IPv4:          s.ipv4,
-		CIDR:          s.cidr,
-		MAC:           s.mac,
-		MTU:           s.mtu,
-		JoinedAt:      s.joinedAt,
-		RoomCreatedAt: s.roomCreatedAt,
-		Peers:         s.peers,
-		RxBytes:       s.rxBytes.Load(),
-		RxFrames:      s.rxFrames.Load(),
-		TxBytes:       s.txBytes.Load(),
-		TxFrames:      s.txFrames.Load(),
-		Reconnects:    s.reconnects.Load(),
+		GeneratedAt:        time.Now(),
+		Server:             s.server,
+		Room:               s.room,
+		DisplayName:        s.displayName,
+		DeviceName:         s.deviceName,
+		InsecureSkipVerify: s.insecureSkipVerify,
+		State:              s.state,
+		LastError:          s.lastError,
+		PeerID:             s.peerID,
+		IPv4:               s.ipv4,
+		CIDR:               s.cidr,
+		MAC:                s.mac,
+		MTU:                s.mtu,
+		JoinedAt:           s.joinedAt,
+		RoomCreatedAt:      s.roomCreatedAt,
+		Peers:              s.peers,
+		RxBytes:            s.rxBytes.Load(),
+		RxFrames:           s.rxFrames.Load(),
+		TxBytes:            s.txBytes.Load(),
+		TxFrames:           s.txFrames.Load(),
+		Reconnects:         s.reconnects.Load(),
 	}
 }
 

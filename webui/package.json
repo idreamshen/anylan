@@ -1,0 +1,13 @@
+{
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "latest",
+    "@mdi/font": "latest",
+    "vite": "latest",
+    "vue": "latest",
+    "vuetify": "latest"
+  },
+  "devDependencies": {}
+}
