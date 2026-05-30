@@ -1,6 +1,6 @@
 OUT_DIR := out
 
-.PHONY: all build webui-build build-client build-server build-windows build-darwin test clean
+.PHONY: all build webui-build build-client build-server build-linux build-windows build-darwin test clean
 
 all: build
 
@@ -17,9 +17,14 @@ build-client: webui-build
 build-server: webui-build
 	go build -o $(OUT_DIR)/anylan-server ./cmd/server
 
+## cross-compile Linux client and server (amd64)
+build-linux: webui-build
+	GOOS=linux GOARCH=amd64 go build -o $(OUT_DIR)/anylan-client-linux-amd64 ./cmd/client
+	GOOS=linux GOARCH=amd64 go build -o $(OUT_DIR)/anylan-server-linux-amd64 ./cmd/server
+
 ## cross-compile the client for Windows (amd64)
 build-windows: webui-build
-	GOOS=windows GOARCH=amd64 go build -o $(OUT_DIR)/anylan-client.exe ./cmd/client
+	GOOS=windows GOARCH=amd64 go build -o $(OUT_DIR)/anylan-client-windows-amd64.exe ./cmd/client
 
 ## cross-compile the client for Darwin/macOS (amd64 + arm64)
 build-darwin: webui-build

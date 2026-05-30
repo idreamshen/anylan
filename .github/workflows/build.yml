@@ -15,8 +15,8 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Build
-        run: make build
+      - name: Build Linux binaries
+        run: make build-linux
 
       - name: Test
         run: make test
@@ -24,8 +24,10 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: anylan-linux
-          path: out/
+          name: anylan-linux-amd64
+          path: |
+            out/anylan-client-linux-amd64
+            out/anylan-server-linux-amd64
           retention-days: 7
 
   windows:
@@ -42,8 +44,8 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: anylan-windows
-          path: out/
+          name: anylan-client-windows-amd64
+          path: out/anylan-client-windows-amd64.exe
           retention-days: 7
 
   darwin:
@@ -60,8 +62,10 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: anylan-darwin
-          path: out/
+          name: anylan-client-darwin
+          path: |
+            out/anylan-client-darwin-amd64
+            out/anylan-client-darwin-arm64
           retention-days: 7
 
   docker:

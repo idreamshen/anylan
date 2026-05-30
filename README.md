@@ -41,12 +41,14 @@ Windows client cross-compile:
 
 ```bash
 make build-windows
+# writes out/anylan-client-windows-amd64.exe
 ```
 
 Darwin/macOS client cross-compile:
 
 ```bash
 make build-darwin
+# writes out/anylan-client-darwin-amd64 and out/anylan-client-darwin-arm64
 ```
 
 ### 1. Start the Server
@@ -84,7 +86,7 @@ sudo ./out/anylan-client
 **Windows** (run as Administrator):
 
 ```powershell
-.\out\anylan-client.exe
+.\out\anylan-client-windows-amd64.exe
 ```
 
 **macOS**:
@@ -172,10 +174,16 @@ discovery does not show the room.
 ```bash
 make test          # run the test suite
 make build         # build client and server for the current platform
-make build-windows # cross-compile Windows client (anylan-client.exe)
+make build-linux   # cross-compile Linux binaries (client/server amd64)
+make build-windows # cross-compile Windows client (amd64)
 make build-darwin  # cross-compile Darwin/macOS clients (amd64 + arm64)
 make clean         # remove built binaries
 ```
+
+Cross-compiled outputs are named by role, OS, and architecture:
+`anylan-client-linux-amd64`, `anylan-server-linux-amd64`,
+`anylan-client-windows-amd64.exe`, `anylan-client-darwin-amd64`, and
+`anylan-client-darwin-arm64`.
 
 Or directly with Go:
 
