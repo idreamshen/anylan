@@ -15,12 +15,11 @@ const previous = ref(null)
 const previousAt = ref(Date.now())
 const touched = reactive({})
 const form = reactive({
-  server: '',
+  server_host: '',
+  server_port: '4433',
   room: '',
-  room_key: '',
   display_name: '',
   device_name: '',
-  insecure_skip_verify: false,
 })
 
 const busy = computed(() => ['starting', 'connecting', 'connected', 'reconnecting', 'leaving'].includes(props.status.state || ''))
@@ -40,11 +39,10 @@ const peerHeaders = [
 ]
 
 watch(() => props.status, status => {
-  if (!touched.server) form.server = status.server || ''
+  if (!touched.server_host && !touched.server_port) setServerFields(status.server || '')
   if (!touched.room) form.room = status.room || ''
   if (!touched.display_name) form.display_name = status.display_name || ''
   if (!touched.device_name) form.device_name = status.device_name || ''
-  if (!touched.insecure_skip_verify) form.insecure_skip_verify = !!status.insecure_skip_verify
 }, { immediate: true })
 
 watch(() => props.status, (status, oldStatus) => {
@@ -63,7 +61,15 @@ onMounted(async () => {
 async function join() {
   try {
     error.value = ''
-    await postJSON('/api/join', { ...form })
+    const server = serverAddress()
+    if (!server) throw new Error('server host and port are required')
+    await postJSON('/api/join', {
+      server,
+      room: form.room,
+      display_name: form.display_name,
+      device_name: form.device_name,
+      insecure_skip_verify: true,
+    })
     clearTouched()
     emit('refresh')
   } catch (err) {
@@ -88,6 +94,37 @@ function markTouched(name) {
 
 function clearTouched() {
   for (const key of Object.keys(touched)) delete touched[key]
+}
+
+function setServerFields(server) {
+  const trimmed = String(server || '').trim()
+  if (!trimmed) {
+    form.server_host = ''
+    form.server_port = form.server_port || '4433'
+    return
+  }
+  try {
+    const parsed = new URL(`anylan://${trimmed}`)
+    form.server_host = parsed.hostname
+    form.server_port = parsed.port || '4433'
+  } catch {
+    const idx = trimmed.lastIndexOf(':')
+    if (idx > 0 && !trimmed.slice(0, idx).includes(':')) {
+      form.server_host = trimmed.slice(0, idx)
+      form.server_port = trimmed.slice(idx + 1) || '4433'
+      return
+    }
+    form.server_host = trimmed
+    form.server_port = form.server_port || '4433'
+  }
+}
+
+function serverAddress() {
+  const host = form.server_host.trim()
+  const port = form.server_port.trim()
+  if (!host || !port) return ''
+  if (host.includes(':') && !host.startsWith('[')) return `[${host}]:${port}`
+  return `${host}:${port}`
 }
 
 function bytes(value) {
@@ -174,7 +211,10 @@ function time(value) {
           <v-form @submit.prevent="join">
             <v-row>
               <v-col cols="12" md="6" lg="4">
-                <v-text-field v-model="form.server" label="Server" placeholder="your-server:4433" @update:model-value="markTouched('server')" />
+                <v-text-field v-model="form.server_host" label="Server host" placeholder="your-server" @update:model-value="markTouched('server_host')" />
+              </v-col>
+              <v-col cols="12" md="6" lg="4">
+                <v-text-field v-model="form.server_port" label="Server port" placeholder="4433" @update:model-value="markTouched('server_port')" />
               </v-col>
               <v-col cols="12" md="6" lg="4">
                 <v-text-field v-model="form.room" label="Room" placeholder="room code" @update:model-value="markTouched('room')" />
@@ -183,16 +223,7 @@ function time(value) {
                 <v-text-field v-model="form.display_name" label="Name" placeholder="shown to peers" @update:model-value="markTouched('display_name')" />
               </v-col>
               <v-col cols="12" md="6" lg="4">
-                <v-text-field v-model="form.room_key" label="Room key" placeholder="optional" @update:model-value="markTouched('room_key')" />
-              </v-col>
-              <v-col cols="12" md="6" lg="4">
                 <v-select v-model="form.device_name" :items="deviceItems" label="Virtual adapter" @update:model-value="markTouched('device_name')" />
-              </v-col>
-              <v-col cols="12" md="6" lg="4">
-                <v-text-field v-model="form.device_name" label="Adapter name" placeholder="anylan0" @update:model-value="markTouched('device_name')" />
-              </v-col>
-              <v-col cols="12" md="6" lg="4">
-                <v-checkbox v-model="form.insecure_skip_verify" label="Skip TLS verification" @update:model-value="markTouched('insecure_skip_verify')" />
               </v-col>
             </v-row>
             <v-card-actions class="px-0">

@@ -67,16 +67,13 @@ Pick any room name. Everyone who uses the same name ends up on the same virtual
 LAN.
 
 Start the client control WebUI, then open <http://127.0.0.1:8081> and enter the
-server address, room code, display name, and virtual adapter.
+server host, server port, room code, display name, and virtual adapter.
 
 **Linux:**
 
 ```bash
 sudo ./out/anylan-client
 ```
-
-For a server started with `--room-key`, clients must pass the same
-`--room-key` value when joining.
 
 **Windows** (run as Administrator):
 
@@ -117,7 +114,6 @@ The `join` subcommand accepts these options:
 |---|---|---|
 | `--server` | *(required)* | Server address, e.g. `1.2.3.4:4433` |
 | `--room` | *(required)* | Room code to join |
-| `--room-key` | | Optional room access key required by the server |
 | `--name` | | Display name shown to other players |
 | `--dev` | `anylan0` | Virtual network adapter name (on Windows, the TAP adapter friendly name, e.g. `"Ethernet 3"`) |
 | `--insecure-skip-verify` | `false` | Skip TLS certificate check (for testing only) |
@@ -129,7 +125,6 @@ The `join` subcommand accepts these options:
 | Flag | Default | Description |
 |---|---|---|
 | `--listen` | `:4433` | UDP listen address |
-| `--room-key` | | Optional room access key required from clients |
 | `--tls-cert` | | TLS certificate file |
 | `--tls-key` | | TLS private key file |
 | `--insecure-dev-cert` | `false` | Use a throwaway self-signed certificate |

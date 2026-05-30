@@ -51,3 +51,11 @@ func TestNormalizeConfigTrimsAndDefaults(t *testing.T) {
 		t.Fatal("DeviceName was not defaulted")
 	}
 }
+
+func TestConfigFromJoinRequestDefaultsWebUITLS(t *testing.T) {
+	req := JoinRequest{Server: "example:4433", Room: "room", InsecureSkipVerify: true}
+	cfg := configFromJoinRequest(req)
+	if !cfg.InsecureSkipVerify {
+		t.Fatal("InsecureSkipVerify was not copied from WebUI request")
+	}
+}

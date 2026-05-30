@@ -14,7 +14,6 @@ func main() {
 	var (
 		listen          = flag.String("listen", ":4433", "UDP listen address")
 		pool            = flag.String("pool", "10.240.0.0/12", "IPv4 pool for room /24 allocations")
-		roomKey         = flag.String("room-key", "", "optional room access key required from clients")
 		tlsCert         = flag.String("tls-cert", "", "TLS certificate path")
 		tlsKey          = flag.String("tls-key", "", "TLS private key path")
 		insecureDevCert = flag.Bool("insecure-dev-cert", false, "generate an ephemeral self-signed certificate for local development")
@@ -35,7 +34,6 @@ func main() {
 	srv := server.Server{
 		Addr:            *listen,
 		Pool:            parsedPool,
-		RoomKey:         *roomKey,
 		TLSCertFile:     *tlsCert,
 		TLSKeyFile:      *tlsKey,
 		InsecureDevCert: *insecureDevCert,

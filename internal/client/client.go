@@ -30,7 +30,6 @@ const DefaultWebAddr = "127.0.0.1:8081"
 type Config struct {
 	Server             string
 	Room               string
-	RoomKey            string
 	DisplayName        string
 	DeviceName         string
 	InsecureSkipVerify bool
@@ -41,7 +40,6 @@ type Config struct {
 type JoinRequest struct {
 	Server             string `json:"server"`
 	Room               string `json:"room"`
-	RoomKey            string `json:"room_key"`
 	DisplayName        string `json:"display_name"`
 	DeviceName         string `json:"device_name"`
 	InsecureSkipVerify bool   `json:"insecure_skip_verify"`
@@ -94,7 +92,6 @@ func normalizeConfig(cfg *Config) error {
 	if cfg.Room == "" {
 		return fmt.Errorf("room is required")
 	}
-	cfg.RoomKey = strings.TrimSpace(cfg.RoomKey)
 	cfg.DisplayName = strings.TrimSpace(cfg.DisplayName)
 	cfg.DeviceName = strings.TrimSpace(cfg.DeviceName)
 	if cfg.DeviceName == "" {
@@ -107,7 +104,6 @@ func configFromJoinRequest(req JoinRequest) Config {
 	return Config{
 		Server:             req.Server,
 		Room:               req.Room,
-		RoomKey:            req.RoomKey,
 		DisplayName:        req.DisplayName,
 		DeviceName:         req.DeviceName,
 		InsecureSkipVerify: req.InsecureSkipVerify,
@@ -260,7 +256,6 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 	join := protocol.JoinRoom{
 		Version:     protocol.Version,
 		Room:        cfg.Room,
-		RoomKey:     cfg.RoomKey,
 		DisplayName: cfg.DisplayName,
 		Nonce:       nonce,
 	}

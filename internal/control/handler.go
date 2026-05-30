@@ -19,7 +19,6 @@ var errRejected = errors.New("join rejected")
 type Handler struct {
 	Manager *relay.Manager
 	MTU     int
-	RoomKey string
 }
 
 func (h Handler) HandleConnection(ctx context.Context, conn quic.Connection) {
@@ -59,11 +58,6 @@ func (h Handler) handleStream(ctx context.Context, conn quic.Connection, control
 		rejectAndCloseStream(controlStream, "room is required")
 		return errRejected
 	}
-	if h.RoomKey != "" && join.RoomKey != h.RoomKey {
-		rejectAndCloseStream(controlStream, "invalid room key")
-		return errRejected
-	}
-
 	peer, err := h.Manager.Join(join.Room, relay.JoinOptions{
 		DisplayName: join.DisplayName,
 	})

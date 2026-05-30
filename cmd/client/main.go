@@ -44,7 +44,6 @@ func runJoin() {
 	fs := flag.NewFlagSet("join", flag.ExitOnError)
 	server := fs.String("server", "", "anylan-server address")
 	room := fs.String("room", "", "room code")
-	roomKey := fs.String("room-key", "", "optional room access key")
 	name := fs.String("name", "", "optional display name")
 	dev := fs.String("dev", tap.DefaultDeviceName(), "TAP device name")
 	insecureSkipVerify := fs.Bool("insecure-skip-verify", false, "skip server certificate verification for local development")
@@ -58,7 +57,6 @@ func runJoin() {
 	cfg := client.Config{
 		Server:             *server,
 		Room:               *room,
-		RoomKey:            *roomKey,
 		DisplayName:        *name,
 		DeviceName:         *dev,
 		InsecureSkipVerify: *insecureSkipVerify,

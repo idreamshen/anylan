@@ -28,7 +28,6 @@ const alpn = "anylan-mvp"
 type Server struct {
 	Addr            string
 	Pool            netip.Prefix
-	RoomKey         string
 	TLSCertFile     string
 	TLSKeyFile      string
 	InsecureDevCert bool
@@ -76,7 +75,6 @@ func (s Server) Serve(ctx context.Context, listener *quic.Listener) error {
 	handler := control.Handler{
 		Manager: manager,
 		MTU:     s.MTU,
-		RoomKey: s.RoomKey,
 	}
 	if s.WebAddr != "" {
 		go func() {
