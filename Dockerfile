@@ -10,7 +10,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=webui /webui/dist ./internal/webui/dist
+COPY --from=webui /internal/webui/dist ./internal/webui/dist
 RUN CGO_ENABLED=0 go build -o /anylan-server ./cmd/server
 
 FROM alpine:3.19
