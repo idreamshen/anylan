@@ -10,6 +10,7 @@ const emit = defineEmits(['refresh'])
 
 const devices = ref([])
 const error = ref('')
+const activeTab = ref('status')
 const previous = ref(null)
 const previousAt = ref(Date.now())
 const touched = reactive({})
@@ -121,72 +122,86 @@ function time(value) {
   </v-alert>
 
   <v-card>
-    <v-card-title>Join Room</v-card-title>
-    <v-card-text>
-      <v-form @submit.prevent="join">
-        <v-row>
-          <v-col cols="12" md="6" lg="4">
-            <v-text-field v-model="form.server" label="Server" placeholder="your-server:4433" @update:model-value="markTouched('server')" />
-          </v-col>
-          <v-col cols="12" md="6" lg="4">
-            <v-text-field v-model="form.room" label="Room" placeholder="room code" @update:model-value="markTouched('room')" />
-          </v-col>
-          <v-col cols="12" md="6" lg="4">
-            <v-text-field v-model="form.display_name" label="Name" placeholder="shown to peers" @update:model-value="markTouched('display_name')" />
-          </v-col>
-          <v-col cols="12" md="6" lg="4">
-            <v-text-field v-model="form.room_key" label="Room key" placeholder="optional" @update:model-value="markTouched('room_key')" />
-          </v-col>
-          <v-col cols="12" md="6" lg="4">
-            <v-select v-model="form.device_name" :items="deviceItems" label="Virtual adapter" @update:model-value="markTouched('device_name')" />
-          </v-col>
-          <v-col cols="12" md="6" lg="4">
-            <v-text-field v-model="form.device_name" label="Adapter name" placeholder="anylan0" @update:model-value="markTouched('device_name')" />
-          </v-col>
-          <v-col cols="12" md="6" lg="4">
-            <v-checkbox v-model="form.insecure_skip_verify" label="Skip TLS verification" @update:model-value="markTouched('insecure_skip_verify')" />
-          </v-col>
-        </v-row>
-        <v-card-actions class="px-0">
-          <v-btn color="primary" type="submit" variant="flat" :disabled="busy">Join</v-btn>
-          <v-btn color="error" variant="tonal" :disabled="!busy" @click="leave">Leave</v-btn>
-        </v-card-actions>
-      </v-form>
-    </v-card-text>
-  </v-card>
+    <v-tabs v-model="activeTab" color="primary">
+      <v-tab value="status">Status</v-tab>
+      <v-tab value="peers">Peers</v-tab>
+      <v-tab value="connect">Connect</v-tab>
+    </v-tabs>
 
-  <v-row class="mt-4">
-    <v-col cols="12" sm="6" lg="3"><MetricCard label="State" :value="status.state || 'unknown'" /></v-col>
-    <v-col cols="12" sm="6" lg="3"><MetricCard label="Room" :value="status.room || '-'" /></v-col>
-    <v-col cols="12" sm="6" lg="3"><MetricCard label="Virtual IP" :value="status.ipv4 || '-'" /></v-col>
-    <v-col cols="12" sm="6" lg="3"><MetricCard label="Peers" :value="peers.length" /></v-col>
-    <v-col cols="12" sm="6" lg="3"><MetricCard label="RX rate" :value="`${bytes(rate('rx_bytes'))}/s`" /></v-col>
-    <v-col cols="12" sm="6" lg="3"><MetricCard label="TX rate" :value="`${bytes(rate('tx_bytes'))}/s`" /></v-col>
-    <v-col cols="12" sm="6" lg="3"><MetricCard label="Reconnects" :value="status.reconnects || 0" /></v-col>
-  </v-row>
+    <v-window v-model="activeTab">
+      <v-window-item value="status">
+        <v-card-text>
+          <v-row>
+            <v-col cols="12" sm="6" lg="3"><MetricCard label="State" :value="status.state || 'unknown'" /></v-col>
+            <v-col cols="12" sm="6" lg="3"><MetricCard label="Room" :value="status.room || '-'" /></v-col>
+            <v-col cols="12" sm="6" lg="3"><MetricCard label="Virtual IP" :value="status.ipv4 || '-'" /></v-col>
+            <v-col cols="12" sm="6" lg="3"><MetricCard label="Peers" :value="peers.length" /></v-col>
+            <v-col cols="12" sm="6" lg="3"><MetricCard label="RX rate" :value="`${bytes(rate('rx_bytes'))}/s`" /></v-col>
+            <v-col cols="12" sm="6" lg="3"><MetricCard label="TX rate" :value="`${bytes(rate('tx_bytes'))}/s`" /></v-col>
+            <v-col cols="12" sm="6" lg="3"><MetricCard label="Reconnects" :value="status.reconnects || 0" /></v-col>
+          </v-row>
 
-  <v-card class="mt-4">
-    <v-card-title>Session</v-card-title>
-    <v-table>
-      <tbody>
-        <tr><th>Server</th><td>{{ status.server || '-' }}</td></tr>
-        <tr><th>Peer ID</th><td>{{ status.peer_id || '-' }}</td></tr>
-        <tr><th>CIDR</th><td>{{ status.cidr || '-' }}</td></tr>
-        <tr><th>MAC</th><td>{{ status.mac || '-' }}</td></tr>
-        <tr><th>MTU</th><td>{{ status.mtu || '-' }}</td></tr>
-        <tr><th>Room created</th><td>{{ time(status.room_created_at) }}</td></tr>
-        <tr><th>RX total</th><td>{{ bytes(status.rx_bytes || 0) }}</td></tr>
-        <tr><th>TX total</th><td>{{ bytes(status.tx_bytes || 0) }}</td></tr>
-        <tr><th>Last error</th><td>{{ status.last_error || '' }}</td></tr>
-      </tbody>
-    </v-table>
-  </v-card>
+          <v-card class="mt-4" variant="outlined">
+            <v-card-title>Session</v-card-title>
+            <v-table>
+              <tbody>
+                <tr><th>Server</th><td>{{ status.server || '-' }}</td></tr>
+                <tr><th>Peer ID</th><td>{{ status.peer_id || '-' }}</td></tr>
+                <tr><th>CIDR</th><td>{{ status.cidr || '-' }}</td></tr>
+                <tr><th>MAC</th><td>{{ status.mac || '-' }}</td></tr>
+                <tr><th>MTU</th><td>{{ status.mtu || '-' }}</td></tr>
+                <tr><th>Room created</th><td>{{ time(status.room_created_at) }}</td></tr>
+                <tr><th>RX total</th><td>{{ bytes(status.rx_bytes || 0) }}</td></tr>
+                <tr><th>TX total</th><td>{{ bytes(status.tx_bytes || 0) }}</td></tr>
+                <tr><th>Last error</th><td>{{ status.last_error || '' }}</td></tr>
+              </tbody>
+            </v-table>
+          </v-card>
+        </v-card-text>
+      </v-window-item>
 
-  <v-card class="mt-4">
-    <v-card-title>Peers</v-card-title>
-    <v-data-table :headers="peerHeaders" :items="peers" item-value="id">
-      <template #item.name="{ item }">{{ item.display_name || item.id }}</template>
-      <template #no-data>No peers</template>
-    </v-data-table>
+      <v-window-item value="peers">
+        <v-card-text>
+          <v-data-table :headers="peerHeaders" :items="peers" item-value="id">
+            <template #item.name="{ item }">{{ item.display_name || item.id }}</template>
+            <template #no-data>No peers</template>
+          </v-data-table>
+        </v-card-text>
+      </v-window-item>
+
+      <v-window-item value="connect">
+        <v-card-text>
+          <v-form @submit.prevent="join">
+            <v-row>
+              <v-col cols="12" md="6" lg="4">
+                <v-text-field v-model="form.server" label="Server" placeholder="your-server:4433" @update:model-value="markTouched('server')" />
+              </v-col>
+              <v-col cols="12" md="6" lg="4">
+                <v-text-field v-model="form.room" label="Room" placeholder="room code" @update:model-value="markTouched('room')" />
+              </v-col>
+              <v-col cols="12" md="6" lg="4">
+                <v-text-field v-model="form.display_name" label="Name" placeholder="shown to peers" @update:model-value="markTouched('display_name')" />
+              </v-col>
+              <v-col cols="12" md="6" lg="4">
+                <v-text-field v-model="form.room_key" label="Room key" placeholder="optional" @update:model-value="markTouched('room_key')" />
+              </v-col>
+              <v-col cols="12" md="6" lg="4">
+                <v-select v-model="form.device_name" :items="deviceItems" label="Virtual adapter" @update:model-value="markTouched('device_name')" />
+              </v-col>
+              <v-col cols="12" md="6" lg="4">
+                <v-text-field v-model="form.device_name" label="Adapter name" placeholder="anylan0" @update:model-value="markTouched('device_name')" />
+              </v-col>
+              <v-col cols="12" md="6" lg="4">
+                <v-checkbox v-model="form.insecure_skip_verify" label="Skip TLS verification" @update:model-value="markTouched('insecure_skip_verify')" />
+              </v-col>
+            </v-row>
+            <v-card-actions class="px-0">
+              <v-btn color="primary" type="submit" variant="flat" :disabled="busy">Join</v-btn>
+              <v-btn color="error" variant="tonal" :disabled="!busy" @click="leave">Leave</v-btn>
+            </v-card-actions>
+          </v-form>
+        </v-card-text>
+      </v-window-item>
+    </v-window>
   </v-card>
 </template>
