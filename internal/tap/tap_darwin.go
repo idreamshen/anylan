@@ -55,7 +55,7 @@ func ListDevices() ([]DeviceInfo, error) {
 	return devices, nil
 }
 
-func Configure(ctx context.Context, name, _ string, cidr string, mtu int) error {
+func Configure(ctx context.Context, name, _ string, cidr string, mtu int, prioritize bool) error {
 	ip, mask, err := IPv4AndMask(cidr)
 	if err != nil {
 		return err
@@ -64,6 +64,9 @@ func Configure(ctx context.Context, name, _ string, cidr string, mtu int) error 
 	commands := [][]string{
 		{"ifconfig", name, "inet", ip, ip, "netmask", mask, "mtu", strconv.Itoa(mtu), "up"},
 		{"route", "add", "-net", networkCIDR(cidr), "-interface", name},
+	}
+	if prioritize {
+		commands = append(commands, []string{"ifconfig", name, "metric", "1"})
 	}
 
 	for i, args := range commands {

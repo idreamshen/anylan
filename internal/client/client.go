@@ -32,23 +32,25 @@ const alpn = "anylan-mvp"
 const DefaultWebAddr = "127.0.0.1:18081"
 
 type Config struct {
-	Server             string
-	Room               string
-	DisplayName        string
-	DeviceName         string
-	InsecureSkipVerify bool
-	WebAddr            string
-	WebToken           string
-	Logs               *logmem.Recorder
-	Capture            *capture.Recorder
+	Server                   string
+	Room                     string
+	DisplayName              string
+	DeviceName               string
+	InsecureSkipVerify       bool
+	PrioritizeVirtualAdapter bool
+	WebAddr                  string
+	WebToken                 string
+	Logs                     *logmem.Recorder
+	Capture                  *capture.Recorder
 }
 
 type JoinRequest struct {
-	Server             string `json:"server"`
-	Room               string `json:"room"`
-	DisplayName        string `json:"display_name"`
-	DeviceName         string `json:"device_name"`
-	InsecureSkipVerify bool   `json:"insecure_skip_verify"`
+	Server                   string `json:"server"`
+	Room                     string `json:"room"`
+	DisplayName              string `json:"display_name"`
+	DeviceName               string `json:"device_name"`
+	InsecureSkipVerify       bool   `json:"insecure_skip_verify"`
+	PrioritizeVirtualAdapter bool   `json:"prioritize_virtual_adapter"`
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -143,11 +145,12 @@ func normalizeConfig(cfg *Config) error {
 
 func configFromJoinRequest(req JoinRequest) Config {
 	return Config{
-		Server:             req.Server,
-		Room:               req.Room,
-		DisplayName:        req.DisplayName,
-		DeviceName:         req.DeviceName,
-		InsecureSkipVerify: req.InsecureSkipVerify,
+		Server:                   req.Server,
+		Room:                     req.Room,
+		DisplayName:              req.DisplayName,
+		DeviceName:               req.DeviceName,
+		InsecureSkipVerify:       req.InsecureSkipVerify,
+		PrioritizeVirtualAdapter: req.PrioritizeVirtualAdapter,
 	}
 }
 
@@ -362,7 +365,7 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 		defer device.Close()
 	}
 
-	if err := tap.Configure(ctx, device.Name(), accept.MAC, accept.CIDR, accept.MTU); err != nil {
+	if err := tap.Configure(ctx, device.Name(), accept.MAC, accept.CIDR, accept.MTU, cfg.PrioritizeVirtualAdapter); err != nil {
 		return fatalf("configure TAP device: %w", err)
 	}
 	log.Printf("tap configured dev=%s layer=%s room=%q peer=%s cidr=%s mac=%s mtu=%d", device.Name(), device.Layer(), accept.Room, accept.PeerID, accept.CIDR, accept.MAC, accept.MTU)
@@ -406,13 +409,14 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 type Status struct {
 	mu sync.Mutex
 
-	server             string
-	room               string
-	displayName        string
-	deviceName         string
-	insecureSkipVerify bool
-	state              string
-	lastError          string
+	server                   string
+	room                     string
+	displayName              string
+	deviceName               string
+	insecureSkipVerify       bool
+	prioritizeVirtualAdapter bool
+	state                    string
+	lastError                string
 
 	peerID        string
 	ipv4          string
@@ -432,27 +436,28 @@ type Status struct {
 }
 
 type Snapshot struct {
-	GeneratedAt        time.Time           `json:"generated_at"`
-	Server             string              `json:"server"`
-	Room               string              `json:"room"`
-	DisplayName        string              `json:"display_name,omitempty"`
-	DeviceName         string              `json:"device_name,omitempty"`
-	InsecureSkipVerify bool                `json:"insecure_skip_verify"`
-	State              string              `json:"state"`
-	LastError          string              `json:"last_error,omitempty"`
-	PeerID             string              `json:"peer_id,omitempty"`
-	IPv4               string              `json:"ipv4,omitempty"`
-	CIDR               string              `json:"cidr,omitempty"`
-	MAC                string              `json:"mac,omitempty"`
-	MTU                int                 `json:"mtu,omitempty"`
-	JoinedAt           time.Time           `json:"joined_at,omitempty"`
-	RoomCreatedAt      time.Time           `json:"room_created_at,omitempty"`
-	Peers              []protocol.PeerInfo `json:"peers,omitempty"`
-	RxBytes            uint64              `json:"rx_bytes"`
-	RxFrames           uint64              `json:"rx_frames"`
-	TxBytes            uint64              `json:"tx_bytes"`
-	TxFrames           uint64              `json:"tx_frames"`
-	Reconnects         uint64              `json:"reconnects"`
+	GeneratedAt              time.Time           `json:"generated_at"`
+	Server                   string              `json:"server"`
+	Room                     string              `json:"room"`
+	DisplayName              string              `json:"display_name,omitempty"`
+	DeviceName               string              `json:"device_name,omitempty"`
+	InsecureSkipVerify       bool                `json:"insecure_skip_verify"`
+	PrioritizeVirtualAdapter bool                `json:"prioritize_virtual_adapter"`
+	State                    string              `json:"state"`
+	LastError                string              `json:"last_error,omitempty"`
+	PeerID                   string              `json:"peer_id,omitempty"`
+	IPv4                     string              `json:"ipv4,omitempty"`
+	CIDR                     string              `json:"cidr,omitempty"`
+	MAC                      string              `json:"mac,omitempty"`
+	MTU                      int                 `json:"mtu,omitempty"`
+	JoinedAt                 time.Time           `json:"joined_at,omitempty"`
+	RoomCreatedAt            time.Time           `json:"room_created_at,omitempty"`
+	Peers                    []protocol.PeerInfo `json:"peers,omitempty"`
+	RxBytes                  uint64              `json:"rx_bytes"`
+	RxFrames                 uint64              `json:"rx_frames"`
+	TxBytes                  uint64              `json:"tx_bytes"`
+	TxFrames                 uint64              `json:"tx_frames"`
+	Reconnects               uint64              `json:"reconnects"`
 }
 
 type sessionLogSnapshot struct {
@@ -474,13 +479,14 @@ type sessionLogSnapshot struct {
 
 func newStatus(cfg Config) *Status {
 	return &Status{
-		server:             cfg.Server,
-		room:               cfg.Room,
-		displayName:        cfg.DisplayName,
-		deviceName:         cfg.DeviceName,
-		insecureSkipVerify: cfg.InsecureSkipVerify,
-		state:              "starting",
-		updatedAt:          time.Now(),
+		server:                   cfg.Server,
+		room:                     cfg.Room,
+		displayName:              cfg.DisplayName,
+		deviceName:               cfg.DeviceName,
+		insecureSkipVerify:       cfg.InsecureSkipVerify,
+		prioritizeVirtualAdapter: cfg.PrioritizeVirtualAdapter,
+		state:                    "starting",
+		updatedAt:                time.Now(),
 	}
 }
 
@@ -498,6 +504,7 @@ func (s *Status) startSession(cfg Config) {
 	s.displayName = cfg.DisplayName
 	s.deviceName = cfg.DeviceName
 	s.insecureSkipVerify = cfg.InsecureSkipVerify
+	s.prioritizeVirtualAdapter = cfg.PrioritizeVirtualAdapter
 	s.state = "starting"
 	s.lastError = ""
 	s.peerID = ""
@@ -682,27 +689,28 @@ func (s *Status) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return Snapshot{
-		GeneratedAt:        time.Now(),
-		Server:             s.server,
-		Room:               s.room,
-		DisplayName:        s.displayName,
-		DeviceName:         s.deviceName,
-		InsecureSkipVerify: s.insecureSkipVerify,
-		State:              s.state,
-		LastError:          s.lastError,
-		PeerID:             s.peerID,
-		IPv4:               s.ipv4,
-		CIDR:               s.cidr,
-		MAC:                s.mac,
-		MTU:                s.mtu,
-		JoinedAt:           s.joinedAt,
-		RoomCreatedAt:      s.roomCreatedAt,
-		Peers:              s.peers,
-		RxBytes:            s.rxBytes.Load(),
-		RxFrames:           s.rxFrames.Load(),
-		TxBytes:            s.txBytes.Load(),
-		TxFrames:           s.txFrames.Load(),
-		Reconnects:         s.reconnects.Load(),
+		GeneratedAt:              time.Now(),
+		Server:                   s.server,
+		Room:                     s.room,
+		DisplayName:              s.displayName,
+		DeviceName:               s.deviceName,
+		InsecureSkipVerify:       s.insecureSkipVerify,
+		PrioritizeVirtualAdapter: s.prioritizeVirtualAdapter,
+		State:                    s.state,
+		LastError:                s.lastError,
+		PeerID:                   s.peerID,
+		IPv4:                     s.ipv4,
+		CIDR:                     s.cidr,
+		MAC:                      s.mac,
+		MTU:                      s.mtu,
+		JoinedAt:                 s.joinedAt,
+		RoomCreatedAt:            s.roomCreatedAt,
+		Peers:                    s.peers,
+		RxBytes:                  s.rxBytes.Load(),
+		RxFrames:                 s.rxFrames.Load(),
+		TxBytes:                  s.txBytes.Load(),
+		TxFrames:                 s.txFrames.Load(),
+		Reconnects:               s.reconnects.Load(),
 	}
 }
 

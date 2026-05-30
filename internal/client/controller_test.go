@@ -55,10 +55,13 @@ func TestNormalizeConfigTrimsAndDefaults(t *testing.T) {
 }
 
 func TestConfigFromJoinRequestDefaultsWebUITLS(t *testing.T) {
-	req := JoinRequest{Server: "example:4433", Room: "room", InsecureSkipVerify: true}
+	req := JoinRequest{Server: "example:4433", Room: "room", InsecureSkipVerify: true, PrioritizeVirtualAdapter: true}
 	cfg := configFromJoinRequest(req)
 	if !cfg.InsecureSkipVerify {
 		t.Fatal("InsecureSkipVerify was not copied from WebUI request")
+	}
+	if !cfg.PrioritizeVirtualAdapter {
+		t.Fatal("PrioritizeVirtualAdapter was not copied from WebUI request")
 	}
 }
 

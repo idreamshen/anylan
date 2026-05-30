@@ -81,7 +81,7 @@ func linuxInterfaceKind(name string) (bool, bool) {
 	return false, false
 }
 
-func Configure(ctx context.Context, name, mac, cidr string, mtu int) error {
+func Configure(ctx context.Context, name, mac, cidr string, mtu int, _ bool) error {
 	commands := [][]string{
 		{"ip", "link", "set", "dev", name, "address", mac},
 		{"ip", "link", "set", "dev", name, "mtu", strconv.Itoa(mtu)},

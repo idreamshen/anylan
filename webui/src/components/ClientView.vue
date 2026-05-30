@@ -22,6 +22,7 @@ const form = reactive({
   room: '',
   display_name: '',
   device_name: '',
+  prioritize_virtual_adapter: false,
 })
 
 const busy = computed(() => ['starting', 'connecting', 'connected', 'reconnecting', 'leaving'].includes(props.status.state || ''))
@@ -45,6 +46,7 @@ watch(() => props.status, status => {
   if (!touched.room) form.room = status.room || ''
   if (!touched.display_name) form.display_name = status.display_name || ''
   if (!touched.device_name) form.device_name = status.device_name || ''
+  if (!touched.prioritize_virtual_adapter) form.prioritize_virtual_adapter = !!status.prioritize_virtual_adapter
 }, { immediate: true })
 
 watch(() => props.status, (status, oldStatus) => {
@@ -71,6 +73,7 @@ async function join() {
       display_name: form.display_name,
       device_name: form.device_name,
       insecure_skip_verify: true,
+      prioritize_virtual_adapter: form.prioritize_virtual_adapter,
     })
     clearTouched()
     emit('refresh')
@@ -228,6 +231,18 @@ function time(value) {
               </v-col>
               <v-col cols="12" md="6" lg="4">
                 <v-select v-model="form.device_name" :items="deviceItems" label="Virtual adapter" @update:model-value="markTouched('device_name')" />
+              </v-col>
+              <v-col cols="12" md="6" lg="4">
+                <v-switch
+                  v-model="form.prioritize_virtual_adapter"
+                  color="primary"
+                  density="comfortable"
+                  hide-details="auto"
+                  label="Prioritize virtual adapter"
+                  hint="Set metric to 1 on macOS/Windows so room traffic prefers anylan."
+                  persistent-hint
+                  @update:model-value="markTouched('prioritize_virtual_adapter')"
+                />
               </v-col>
             </v-row>
             <v-card-actions class="px-0">
