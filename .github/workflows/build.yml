@@ -26,6 +26,7 @@ jobs:
         with:
           name: anylan-linux
           path: out/
+          retention-days: 7
 
   windows:
     runs-on: ubuntu-latest
@@ -43,3 +44,4 @@ jobs:
         with:
           name: anylan-windows
           path: out/
+          retention-days: 7
