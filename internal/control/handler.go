@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"net/netip"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/idreamshen/anylan/internal/protocol"
 	"github.com/idreamshen/anylan/internal/relay"
@@ -43,18 +45,22 @@ func (h Handler) HandleConnection(ctx context.Context, conn quic.Connection) {
 	}
 }
 
-func (h Handler) handleStream(ctx context.Context, conn quic.Connection, controlStream quic.Stream) error {
+func (h Handler) handleStream(ctx context.Context, conn quic.Connection, controlStream quic.Stream) (retErr error) {
+	remote := conn.RemoteAddr().String()
 	var join protocol.JoinRoom
 	if err := protocol.ReadJSON(controlStream, protocol.TypeJoinRoom, protocol.MaxControlSize, &join); err != nil {
+		logJoinReject(remote, "", "invalid join request", err)
 		rejectAndCloseStream(controlStream, "invalid join request")
 		return errRejected
 	}
 	join.Room = strings.TrimSpace(join.Room)
 	if join.Version != protocol.Version {
+		logJoinReject(remote, join.Room, "unsupported protocol version", nil)
 		rejectAndCloseStream(controlStream, "unsupported protocol version")
 		return errRejected
 	}
 	if join.Room == "" {
+		logJoinReject(remote, join.Room, "room is required", nil)
 		rejectAndCloseStream(controlStream, "room is required")
 		return errRejected
 	}
@@ -62,6 +68,7 @@ func (h Handler) handleStream(ctx context.Context, conn quic.Connection, control
 		DisplayName: join.DisplayName,
 	})
 	if err != nil {
+		logJoinReject(remote, join.Room, err.Error(), err)
 		rejectAndCloseStream(controlStream, err.Error())
 		return errRejected
 	}
@@ -70,15 +77,25 @@ func (h Handler) handleStream(ctx context.Context, conn quic.Connection, control
 	// still in the room.
 	defer func() {
 		room := peer.Room
+		roomName := room.Name()
+		peerSnap := peer.Snapshot()
 		peer.Room.RemovePeer(peer)
-		if room.PeerCount() > 0 {
+		remaining := room.PeerCount()
+		logPeerLeft(remote, roomName, peerSnap, remaining, retErr)
+		if remaining > 0 {
 			msg := buildPeerListMsg(room.Snapshot())
 			room.BroadcastNotify(msg, nil)
+		} else {
+			log.Printf("room empty room=%q", roomName)
 		}
 	}()
 
 	// Build initial peer list (includes the joining peer itself).
 	roomSnap := peer.Room.Snapshot()
+	if len(roomSnap.Peers) == 1 {
+		log.Printf("room created room=%q prefix=%s", roomSnap.Name, roomSnap.Prefix)
+	}
+	log.Printf("peer joined room=%q peer=%s name=%q ip=%s mac=%s remote=%s peers=%d", peer.Room.Name(), peer.ID, peer.DisplayName, peer.IP, peer.MAC, remote, len(roomSnap.Peers))
 	accept := protocol.JoinAccept{
 		Version:       protocol.Version,
 		Room:          join.Room,
@@ -226,4 +243,45 @@ func reject(w io.Writer, reason string) error {
 func rejectAndCloseStream(stream quic.Stream, reason string) {
 	_ = reject(stream, reason)
 	_ = stream.Close()
+}
+
+func logJoinReject(remote, room, reason string, err error) {
+	if err != nil {
+		log.Printf("join rejected remote=%s room=%q reason=%q error=%v", remote, room, reason, err)
+		return
+	}
+	log.Printf("join rejected remote=%s room=%q reason=%q", remote, room, reason)
+}
+
+func logPeerLeft(remote, room string, peer relay.PeerSnapshot, remaining int, sessionErr error) {
+	reason := "closed"
+	if sessionErr != nil {
+		switch {
+		case errors.Is(sessionErr, io.EOF):
+			reason = "client closed"
+		case errors.Is(sessionErr, context.Canceled):
+			reason = "server shutdown"
+		default:
+			reason = sessionErr.Error()
+		}
+	}
+	duration := time.Since(peer.ConnectedAt).Round(time.Second)
+	log.Printf(
+		"peer left room=%q peer=%s name=%q ip=%s mac=%s remote=%s duration=%s reason=%q remaining=%d rx_frames=%d rx_bytes=%d tx_frames=%d tx_bytes=%d drop_frames=%d drop_bytes=%d",
+		room,
+		peer.ID,
+		peer.DisplayName,
+		peer.IP,
+		peer.MAC,
+		remote,
+		duration,
+		reason,
+		remaining,
+		peer.RxFrames,
+		peer.RxBytes,
+		peer.TxFrames,
+		peer.TxBytes,
+		peer.DropFrames,
+		peer.DropBytes,
+	)
 }
