@@ -32,7 +32,7 @@ func Open(name string) (*Device, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Device{iface: iface}, nil
+	return &Device{iface: iface, layer: LayerEthernet}, nil
 }
 
 func ListDevices() ([]DeviceInfo, error) {

@@ -15,12 +15,38 @@ type DeviceInfo struct {
 	Selectable bool   `json:"selectable"`
 }
 
+type Layer int
+
+const (
+	LayerEthernet Layer = iota + 1
+	LayerIP
+)
+
+func (l Layer) String() string {
+	switch l {
+	case LayerEthernet:
+		return "ethernet"
+	case LayerIP:
+		return "ip"
+	default:
+		return "unknown"
+	}
+}
+
 type Device struct {
 	iface *water.Interface
+	layer Layer
 }
 
 func (d *Device) Name() string {
 	return d.iface.Name()
+}
+
+func (d *Device) Layer() Layer {
+	if d.layer == 0 {
+		return LayerEthernet
+	}
+	return d.layer
 }
 
 func (d *Device) HardwareAddr() (net.HardwareAddr, error) {

@@ -36,7 +36,7 @@ func Open(name string) (*Device, error) {
 			lastErr = err
 			continue
 		}
-		return &Device{iface: iface}, nil
+		return &Device{iface: iface, layer: LayerEthernet}, nil
 	}
 	return nil, fmt.Errorf("open Windows TAP adapter failed: %w; install an OpenVPN/tap-windows6 compatible TAP driver and run anylan-client from an Administrator shell", lastErr)
 }

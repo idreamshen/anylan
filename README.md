@@ -24,10 +24,10 @@ it looks like everyone is on the same local network.
 
 ### Prerequisites
 
-| | Linux | Windows |
-|---|---|---|
-| **Client** | Root privileges (for creating the virtual network adapter) | Administrator shell + [OpenVPN TAP driver](https://community.openvpn.net/openvpn/wiki/ManagingWindowsTAPDrivers) installed |
-| **Server** | Any Linux machine with a public UDP port | Not supported yet |
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| **Client** | Root privileges (for creating the virtual network adapter) | Root privileges; uses native `utun` without third-party drivers | Administrator shell + [OpenVPN TAP driver](https://community.openvpn.net/openvpn/wiki/ManagingWindowsTAPDrivers) installed |
+| **Server** | Any Linux machine with a public UDP port | Not supported yet | Not supported yet |
 
 Download pre-built binaries from the
 [Releases](https://github.com/idreamshen/anylan/releases) page, or build from
@@ -41,6 +41,12 @@ Windows client cross-compile:
 
 ```bash
 make build-windows
+```
+
+Darwin/macOS client cross-compile:
+
+```bash
+make build-darwin
 ```
 
 ### 1. Start the Server
@@ -81,6 +87,17 @@ sudo ./out/anylan-client
 .\out\anylan-client.exe
 ```
 
+**macOS**:
+
+```bash
+sudo ./out/anylan-client
+```
+
+macOS uses the built-in `utun` driver. This avoids third-party kernel/network
+drivers, but it is an IP-layer mode: direct virtual-IP connectivity is
+supported, while LAN auto-discovery that depends on true Ethernet broadcast or
+multicast may not work for every game.
+
 To bind the WebUI to another address or port:
 
 ```bash
@@ -115,7 +132,7 @@ The `join` subcommand accepts these options:
 | `--server` | *(required)* | Server address, e.g. `1.2.3.4:4433` |
 | `--room` | *(required)* | Room code to join |
 | `--name` | | Display name shown to other players |
-| `--dev` | `anylan0` | Virtual network adapter name (on Windows, the TAP adapter friendly name, e.g. `"Ethernet 3"`) |
+| `--dev` | `anylan0` on Linux, auto on macOS/Windows | Virtual network adapter name (on macOS, leave empty to auto-create `utun`; on Windows, the TAP adapter friendly name, e.g. `"Ethernet 3"`) |
 | `--insecure-skip-verify` | `false` | Skip TLS certificate check (for testing only) |
 | `--web` | | Start a local HTTP status page, e.g. `127.0.0.1:18081` |
 | `--web-token` | | Bearer token required for the HTTP status page |
@@ -138,9 +155,14 @@ The `join` subcommand accepts these options:
 **"Permission denied" on Linux** -- The client needs root to create a TAP
 device. Run with `sudo`.
 
+**"Permission denied" on macOS** -- The client needs root to create and
+configure a `utun` interface. Run with `sudo`.
+
 **Game doesn't see other players** -- Make sure everyone is in the same room
 and that the game uses LAN/local discovery. Check that each client received an
-IP (`ip addr show anylan0` on Linux, or `ipconfig` on Windows).
+IP (`ip addr show anylan0` on Linux, `ifconfig utunX` on macOS, or `ipconfig`
+on Windows). On macOS, try joining by the peer's virtual IP if automatic LAN
+discovery does not show the room.
 
 **Leftover network adapter after a crash** -- On Linux:
 `sudo ip link delete anylan0`
@@ -151,6 +173,7 @@ IP (`ip addr show anylan0` on Linux, or `ipconfig` on Windows).
 make test          # run the test suite
 make build         # build client and server for the current platform
 make build-windows # cross-compile Windows client (anylan-client.exe)
+make build-darwin  # cross-compile Darwin/macOS clients (amd64 + arm64)
 make clean         # remove built binaries
 ```
 
