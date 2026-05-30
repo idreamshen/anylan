@@ -52,7 +52,7 @@ The client uses Linux TAP devices and `ip` commands, so real client runs require
 Start a local relay with an ephemeral self-signed certificate:
 
 ```bash
-go run ./cmd/server --listen :4433 --insecure-dev-cert --web 0.0.0.0:18080
+go run ./cmd/server --listen :4433 --insecure-dev-cert
 ```
 
 Join from a Linux client:

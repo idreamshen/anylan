@@ -16,6 +16,6 @@ RUN CGO_ENABLED=0 go build -o /anylan-server ./cmd/server
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /anylan-server /usr/local/bin/anylan-server
-EXPOSE 4433
+EXPOSE 4433 18080
 USER nobody
 ENTRYPOINT ["anylan-server"]

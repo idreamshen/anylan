@@ -20,7 +20,7 @@ func main() {
 		tlsKey          = flag.String("tls-key", "", "TLS private key path")
 		insecureDevCert = flag.Bool("insecure-dev-cert", false, "generate an ephemeral self-signed certificate for local development")
 		mtu             = flag.Int("mtu", 1300, "TAP MTU announced to clients")
-		web             = flag.String("web", "", "HTTP status listen address")
+		web             = flag.String("web", ":18080", "HTTP status listen address")
 		webToken        = flag.String("web-token", "", "bearer token required for the HTTP status page")
 	)
 	flag.Parse()
