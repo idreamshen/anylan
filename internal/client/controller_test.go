@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/idreamshen/anylan/internal/webui"
 )
@@ -57,5 +59,35 @@ func TestConfigFromJoinRequestDefaultsWebUITLS(t *testing.T) {
 	cfg := configFromJoinRequest(req)
 	if !cfg.InsecureSkipVerify {
 		t.Fatal("InsecureSkipVerify was not copied from WebUI request")
+	}
+}
+
+func TestSessionLogSnapshotKeepsCountersAndPeer(t *testing.T) {
+	status := newStatus(Config{Server: "example:4433", Room: "room", DisplayName: "alice", DeviceName: "anylan0"})
+	status.peerID = "peer-a"
+	status.ipv4 = "10.240.0.2"
+	status.mac = "02:00:00:00:00:01"
+	status.joinedAt = time.Now()
+	status.recordRx(42)
+	status.recordTx(98)
+
+	snap := status.sessionLogSnapshot()
+	if snap.Server != "example:4433" || snap.Room != "room" || snap.PeerID != "peer-a" {
+		t.Fatalf("unexpected snapshot identity: %#v", snap)
+	}
+	if snap.RxFrames != 1 || snap.RxBytes != 42 || snap.TxFrames != 1 || snap.TxBytes != 98 {
+		t.Fatalf("unexpected snapshot counters: %#v", snap)
+	}
+}
+
+func TestErrorStringNormalizesCommonSessionErrors(t *testing.T) {
+	if got := errorString(nil); got != "closed" {
+		t.Fatalf("nil error string = %q", got)
+	}
+	if got := errorString(context.Canceled); got != "cancelled" {
+		t.Fatalf("cancel error string = %q", got)
+	}
+	if got := errorString(io.EOF); got != "eof" {
+		t.Fatalf("eof error string = %q", got)
 	}
 }

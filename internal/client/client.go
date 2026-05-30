@@ -172,10 +172,12 @@ func (c *Controller) Join(_ context.Context, payload json.RawMessage) (any, erro
 	if err := normalizeConfig(&cfg); err != nil {
 		return nil, webui.APIError{Status: http.StatusBadRequest, Message: err.Error()}
 	}
+	log.Printf("join requested server=%s room=%q name=%q dev=%s", cfg.Server, cfg.Room, cfg.DisplayName, cfg.DeviceName)
 
 	c.mu.Lock()
 	if c.cancel != nil {
 		c.mu.Unlock()
+		log.Printf("join rejected room=%q reason=%q", cfg.Room, "already joined")
 		return nil, webui.APIError{Status: http.StatusConflict, Message: "already joined; leave the current room first"}
 	}
 	sessionCtx, cancel := context.WithCancel(c.ctx)
@@ -209,10 +211,13 @@ func (c *Controller) Join(_ context.Context, payload json.RawMessage) (any, erro
 func (c *Controller) Leave(context.Context, json.RawMessage) (any, error) {
 	c.mu.Lock()
 	cancel := c.cancel
+	snap := c.status.Snapshot()
 	c.mu.Unlock()
 	if cancel == nil {
+		log.Printf("leave requested ignored reason=%q", "not joined")
 		return c.status.Snapshot(), nil
 	}
+	log.Printf("leave requested server=%s room=%q peer=%s name=%q", snap.Server, snap.Room, snap.PeerID, snap.DisplayName)
 	c.status.setState("leaving")
 	cancel()
 	return c.status.Snapshot(), nil
@@ -223,16 +228,20 @@ func runLoop(ctx context.Context, cfg Config, status *Status) error {
 	backoff := time.Second
 	for {
 		status.setState("connecting")
+		log.Printf("connecting server=%s room=%q name=%q dev=%s", cfg.Server, cfg.Room, cfg.DisplayName, cfg.DeviceName)
 		err := runSession(ctx, cfg, status)
 		if ctx.Err() != nil {
+			logSessionEnd(status, ctx.Err(), "stopped")
 			return ctx.Err()
 		}
 		if isFatal(err) {
+			logSessionEnd(status, err, "stopped")
 			status.endSession(err, "stopped")
 			return err
 		}
+		logSessionEnd(status, err, "reconnecting")
 		status.endSession(err, "reconnecting")
-		log.Printf("session ended: %v; reconnecting in %s", err, backoff)
+		log.Printf("reconnect scheduled server=%s room=%q reason=%q delay=%s", cfg.Server, cfg.Room, errorString(err), backoff)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -265,6 +274,7 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 		return err
 	}
 	defer conn.CloseWithError(0, "")
+	log.Printf("connected server=%s room=%q remote=%s", cfg.Server, cfg.Room, conn.RemoteAddr())
 
 	controlStream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
@@ -285,6 +295,7 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 	if err := protocol.WriteJSON(controlStream, protocol.TypeJoinRoom, join); err != nil {
 		return err
 	}
+	log.Printf("join sent server=%s room=%q name=%q", cfg.Server, cfg.Room, cfg.DisplayName)
 
 	typ, payload, err := protocol.ReadMessage(controlStream, protocol.MaxControlSize)
 	if err != nil {
@@ -305,6 +316,7 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 		return fatalf("decode join accept: %w", err)
 	}
 	status.joined(accept)
+	log.Printf("join accepted room=%q peer=%s ip=%s mac=%s mtu=%d peers=%d", accept.Room, accept.PeerID, accept.IPv4, accept.MAC, accept.MTU, len(accept.Peers))
 
 	device, err := tap.Open(cfg.DeviceName)
 	if err != nil {
@@ -315,13 +327,14 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 	if err := tap.Configure(ctx, device.Name(), accept.MAC, accept.CIDR, accept.MTU); err != nil {
 		return fatalf("configure TAP device: %w", err)
 	}
-	log.Printf("joined room %q as peer %s on %s (%s, %s)", accept.Room, accept.PeerID, device.Name(), accept.CIDR, accept.MAC)
+	log.Printf("tap configured dev=%s room=%q peer=%s cidr=%s mac=%s mtu=%d", device.Name(), accept.Room, accept.PeerID, accept.CIDR, accept.MAC, accept.MTU)
 
 	dataStream, err := conn.AcceptStream(ctx)
 	if err != nil {
 		return err
 	}
 	defer dataStream.Close()
+	log.Printf("data stream ready room=%q peer=%s", accept.Room, accept.PeerID)
 
 	errCh := make(chan error, 3)
 	meta := capture.Metadata{Room: cfg.Room, PeerID: accept.PeerID, PeerName: cfg.DisplayName}
@@ -387,6 +400,23 @@ type Snapshot struct {
 	TxBytes            uint64              `json:"tx_bytes"`
 	TxFrames           uint64              `json:"tx_frames"`
 	Reconnects         uint64              `json:"reconnects"`
+}
+
+type sessionLogSnapshot struct {
+	Server      string
+	Room        string
+	DisplayName string
+	DeviceName  string
+	State       string
+	PeerID      string
+	IPv4        string
+	MAC         string
+	JoinedAt    time.Time
+	RxBytes     uint64
+	RxFrames    uint64
+	TxBytes     uint64
+	TxFrames    uint64
+	Reconnects  uint64
 }
 
 func newStatus(cfg Config) *Status {
@@ -461,6 +491,8 @@ func (s *Status) updatePeers(pl protocol.PeerList) {
 	defer s.mu.Unlock()
 	s.roomCreatedAt = pl.RoomCreatedAt
 	s.peers = pl.Peers
+	s.updatedAt = time.Now()
+	log.Printf("peer list updated room=%q peer=%s peers=%d", s.room, s.peerID, len(pl.Peers))
 }
 
 func (s *Status) endSession(err error, state string) {
@@ -479,6 +511,27 @@ func (s *Status) endSession(err error, state string) {
 	s.roomCreatedAt = time.Time{}
 	s.peers = nil
 	s.updatedAt = time.Now()
+}
+
+func (s *Status) sessionLogSnapshot() sessionLogSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return sessionLogSnapshot{
+		Server:      s.server,
+		Room:        s.room,
+		DisplayName: s.displayName,
+		DeviceName:  s.deviceName,
+		State:       s.state,
+		PeerID:      s.peerID,
+		IPv4:        s.ipv4,
+		MAC:         s.mac,
+		JoinedAt:    s.joinedAt,
+		RxBytes:     s.rxBytes.Load(),
+		RxFrames:    s.rxFrames.Load(),
+		TxBytes:     s.txBytes.Load(),
+		TxFrames:    s.txFrames.Load(),
+		Reconnects:  s.reconnects.Load(),
+	}
 }
 
 type fatalError struct {
@@ -500,6 +553,43 @@ func fatalf(format string, args ...any) error {
 func isFatal(err error) bool {
 	var fatal fatalError
 	return errors.As(err, &fatal)
+}
+
+func logSessionEnd(status *Status, err error, nextState string) {
+	snap := status.sessionLogSnapshot()
+	duration := "0s"
+	if !snap.JoinedAt.IsZero() {
+		duration = time.Since(snap.JoinedAt).Round(time.Second).String()
+	}
+	log.Printf(
+		"session ended server=%s room=%q peer=%s name=%q dev=%s next_state=%s reason=%q duration=%s rx_frames=%d rx_bytes=%d tx_frames=%d tx_bytes=%d reconnects=%d",
+		snap.Server,
+		snap.Room,
+		snap.PeerID,
+		snap.DisplayName,
+		snap.DeviceName,
+		nextState,
+		errorString(err),
+		duration,
+		snap.RxFrames,
+		snap.RxBytes,
+		snap.TxFrames,
+		snap.TxBytes,
+		snap.Reconnects,
+	)
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return "closed"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	if errors.Is(err, io.EOF) {
+		return "eof"
+	}
+	return err.Error()
 }
 
 func (s *Status) recordRx(size int) {
