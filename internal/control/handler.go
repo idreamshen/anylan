@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/idreamshen/anylan/internal/capture"
 	"github.com/idreamshen/anylan/internal/protocol"
 	"github.com/idreamshen/anylan/internal/relay"
 	"github.com/quic-go/quic-go"
@@ -21,6 +22,7 @@ var errRejected = errors.New("join rejected")
 type Handler struct {
 	Manager *relay.Manager
 	MTU     int
+	Capture *capture.Recorder
 }
 
 func (h Handler) HandleConnection(ctx context.Context, conn quic.Connection) {
@@ -190,6 +192,7 @@ func (h Handler) handleStream(ctx context.Context, conn quic.Connection, control
 		}
 		switch typ {
 		case protocol.TypeEthernetFrame:
+			h.Capture.Record(capture.Metadata{Direction: "ingress", Room: peer.Room.Name(), PeerID: peer.ID, PeerName: peer.DisplayName}, payload)
 			if !peer.AllowFrame(len(payload)) {
 				peer.RecordDropFrame(len(payload))
 				continue

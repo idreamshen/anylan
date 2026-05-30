@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { getJSON, postJSON } from '../api'
+import CaptureView from './CaptureView.vue'
 import LogView from './LogView.vue'
 import MetricCard from './MetricCard.vue'
 
@@ -164,6 +165,7 @@ function time(value) {
       <v-tab value="status">Status</v-tab>
       <v-tab value="peers">Peers</v-tab>
       <v-tab value="connect">Connect</v-tab>
+      <v-tab value="capture">Capture</v-tab>
       <v-tab value="log">Log</v-tab>
     </v-tabs>
 
@@ -239,6 +241,12 @@ function time(value) {
       <v-window-item value="log">
         <v-card-text>
           <LogView />
+        </v-card-text>
+      </v-window-item>
+
+      <v-window-item value="capture">
+        <v-card-text>
+          <CaptureView />
         </v-card-text>
       </v-window-item>
     </v-window>

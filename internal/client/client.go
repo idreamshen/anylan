@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/idreamshen/anylan/internal/capture"
 	"github.com/idreamshen/anylan/internal/logmem"
 	"github.com/idreamshen/anylan/internal/protocol"
 	"github.com/idreamshen/anylan/internal/tap"
@@ -37,6 +38,7 @@ type Config struct {
 	WebAddr            string
 	WebToken           string
 	Logs               *logmem.Recorder
+	Capture            *capture.Recorder
 }
 
 type JoinRequest struct {
@@ -53,6 +55,9 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 
 	status := newStatus(cfg)
+	if cfg.WebAddr != "" && cfg.Capture == nil {
+		cfg.Capture = capture.NewRecorder(capture.DefaultLimit)
+	}
 	if cfg.WebAddr != "" {
 		go func() {
 			server := webui.Server{
@@ -63,6 +68,9 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 			if cfg.Logs != nil {
 				server.Logs = func() any { return cfg.Logs.Snapshot() }
+			}
+			if cfg.Capture != nil {
+				server.Capture = func() any { return cfg.Capture.Snapshot() }
 			}
 			err := server.ListenAndServe(ctx)
 			if err != nil && ctx.Err() == nil {
@@ -78,6 +86,8 @@ func RunControl(ctx context.Context, webAddr, webToken string, logs *logmem.Reco
 		webAddr = DefaultWebAddr
 	}
 	controller := NewController(ctx)
+	captures := capture.NewRecorder(capture.DefaultLimit)
+	controller.capture = captures
 	server := webui.Server{
 		Addr:     webAddr,
 		Title:    "anylan client",
@@ -90,6 +100,7 @@ func RunControl(ctx context.Context, webAddr, webToken string, logs *logmem.Reco
 	if logs != nil {
 		server.Logs = func() any { return logs.Snapshot() }
 	}
+	server.Capture = func() any { return captures.Snapshot() }
 	return server.ListenAndServe(ctx)
 }
 
@@ -121,11 +132,12 @@ func configFromJoinRequest(req JoinRequest) Config {
 }
 
 type Controller struct {
-	ctx    context.Context
-	mu     sync.Mutex
-	status *Status
-	cancel context.CancelFunc
-	done   chan struct{}
+	ctx     context.Context
+	mu      sync.Mutex
+	status  *Status
+	capture *capture.Recorder
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 func NewController(ctx context.Context) *Controller {
@@ -156,6 +168,7 @@ func (c *Controller) Join(_ context.Context, payload json.RawMessage) (any, erro
 		}
 	}
 	cfg := configFromJoinRequest(req)
+	cfg.Capture = c.capture
 	if err := normalizeConfig(&cfg); err != nil {
 		return nil, webui.APIError{Status: http.StatusBadRequest, Message: err.Error()}
 	}
@@ -311,8 +324,9 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 	defer dataStream.Close()
 
 	errCh := make(chan error, 3)
-	go readTAP(device, dataStream, status, errCh)
-	go writeTAP(device, dataStream, status, errCh)
+	meta := capture.Metadata{Room: cfg.Room, PeerID: accept.PeerID, PeerName: cfg.DisplayName}
+	go readTAP(device, dataStream, status, cfg.Capture, meta, errCh)
+	go writeTAP(device, dataStream, status, cfg.Capture, meta, errCh)
 	go readControl(controlStream, status, errCh)
 
 	select {
@@ -526,7 +540,7 @@ func (s *Status) Snapshot() Snapshot {
 	}
 }
 
-func readTAP(device io.Reader, stream io.Writer, status *Status, errCh chan<- error) {
+func readTAP(device io.Reader, stream io.Writer, status *Status, captures *capture.Recorder, meta capture.Metadata, errCh chan<- error) {
 	buf := make([]byte, protocol.MaxFrameSize)
 	for {
 		n, err := device.Read(buf)
@@ -543,10 +557,12 @@ func readTAP(device io.Reader, stream io.Writer, status *Status, errCh chan<- er
 			return
 		}
 		status.recordTx(len(frame))
+		meta.Direction = "tx"
+		captures.Record(meta, frame)
 	}
 }
 
-func writeTAP(device io.Writer, stream io.Reader, status *Status, errCh chan<- error) {
+func writeTAP(device io.Writer, stream io.Reader, status *Status, captures *capture.Recorder, meta capture.Metadata, errCh chan<- error) {
 	for {
 		typ, payload, err := protocol.ReadMessage(stream, protocol.MaxFrameSize)
 		if err != nil {
@@ -564,6 +580,8 @@ func writeTAP(device io.Writer, stream io.Reader, status *Status, errCh chan<- e
 				return
 			}
 			status.recordRx(len(payload))
+			meta.Direction = "rx"
+			captures.Record(meta, payload)
 		}
 	}
 }

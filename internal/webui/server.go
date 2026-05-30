@@ -26,6 +26,7 @@ type Server struct {
 	Join     APIHandler
 	Leave    APIHandler
 	Logs     func() any
+	Capture  func() any
 }
 
 type APIHandler func(context.Context, json.RawMessage) (any, error)
@@ -47,6 +48,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("/api/join", s.withAuth(s.handleAPI(http.MethodPost, s.Join)))
 	mux.HandleFunc("/api/leave", s.withAuth(s.handleAPI(http.MethodPost, s.Leave)))
 	mux.HandleFunc("/api/logs", s.withAuth(s.handleLogs))
+	mux.HandleFunc("/api/capture", s.withAuth(s.handleCapture))
 	mux.HandleFunc("/assets/", s.withAuth(s.handleAsset))
 	return mux
 }
@@ -138,6 +140,18 @@ func (s Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, s.Logs())
+}
+
+func (s Server) handleCapture(w http.ResponseWriter, r *http.Request) {
+	if s.Capture == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, s.Capture())
 }
 
 func (s Server) handleAPI(method string, handler APIHandler) http.HandlerFunc {

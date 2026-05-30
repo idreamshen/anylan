@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/idreamshen/anylan/internal/capture"
 	"github.com/idreamshen/anylan/internal/control"
 	"github.com/idreamshen/anylan/internal/logmem"
 	"github.com/idreamshen/anylan/internal/protocol"
@@ -36,6 +37,7 @@ type Server struct {
 	WebAddr         string
 	WebToken        string
 	Logs            *logmem.Recorder
+	Capture         *capture.Recorder
 }
 
 func (s Server) ListenAndServe(ctx context.Context) error {
@@ -74,9 +76,14 @@ func (s Server) Serve(ctx context.Context, listener *quic.Listener) error {
 	}
 
 	manager := relay.NewManager(s.Pool)
+	captures := s.Capture
+	if captures == nil && s.WebAddr != "" {
+		captures = capture.NewRecorder(capture.DefaultLimit)
+	}
 	handler := control.Handler{
 		Manager: manager,
 		MTU:     s.MTU,
+		Capture: captures,
 	}
 	if s.WebAddr != "" {
 		go func() {
@@ -88,6 +95,9 @@ func (s Server) Serve(ctx context.Context, listener *quic.Listener) error {
 			}
 			if s.Logs != nil {
 				web.Logs = func() any { return s.Logs.Snapshot() }
+			}
+			if captures != nil {
+				web.Capture = func() any { return captures.Snapshot() }
 			}
 			err := web.ListenAndServe(ctx)
 			if err != nil && ctx.Err() == nil {

@@ -48,6 +48,9 @@ func TestAPIHandlers(t *testing.T) {
 		Logs: func() any {
 			return []map[string]string{{"message": "hello"}}
 		},
+		Capture: func() any {
+			return map[string]int{"count": 1}
+		},
 		Devices: func(context.Context, json.RawMessage) (any, error) {
 			return []map[string]string{{"name": "anylan0"}}, nil
 		},
@@ -91,11 +94,28 @@ func TestAPIHandlers(t *testing.T) {
 	if logsRec.Code != http.StatusOK || !strings.Contains(logsRec.Body.String(), "hello") {
 		t.Fatalf("logs response = %d %s", logsRec.Code, logsRec.Body.String())
 	}
+
+	captureReq := httptest.NewRequest(http.MethodGet, "/api/capture", nil)
+	captureRec := httptest.NewRecorder()
+	handler.ServeHTTP(captureRec, captureReq)
+	if captureRec.Code != http.StatusOK || !strings.Contains(captureRec.Body.String(), "count") {
+		t.Fatalf("capture response = %d %s", captureRec.Code, captureRec.Body.String())
+	}
 }
 
 func TestLogsHandlerIsNotFoundWhenDisabled(t *testing.T) {
 	server := Server{Snapshot: func() any { return nil }}
 	req := httptest.NewRequest(http.MethodGet, "/api/logs", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestCaptureHandlerIsNotFoundWhenDisabled(t *testing.T) {
+	server := Server{Snapshot: func() any { return nil }}
+	req := httptest.NewRequest(http.MethodGet, "/api/capture", nil)
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
