@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="AnyLAN Client"
+      Manufacturer="AnyLAN"
+      Version="$(var.ProductVersion)"
+      UpgradeCode="{89DAEFEB-B106-4E8C-80CE-F6A8BB43341F}"
+      Scope="perMachine"
+      InstallerVersion="500"
+      Compressed="yes">
+
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of AnyLAN Client is already installed." />
+    <Media Id="1" Cabinet="anylan.cab" EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="AnyLAN">
+        <Component Id="AnyLANClientComponent" Guid="{99EF9049-092B-4294-B566-787AA85747EA}">
+          <File
+              Id="AnyLANClientExe"
+              Source="$(var.ClientExe)"
+              Name="anylan-client.exe"
+              KeyPath="yes" />
+        </Component>
+
+        <Merge
+            Id="TapWindowsDriver"
+            SourceFile="$(var.TapMsm)"
+            Language="0"
+            DiskId="1" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Complete" Title="AnyLAN Client" Level="1">
+      <ComponentRef Id="AnyLANClientComponent" />
+      <MergeRef Id="TapWindowsDriver" />
+    </Feature>
+  </Package>
+</Wix>
