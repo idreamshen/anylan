@@ -31,6 +31,12 @@ const alpn = "anylan-mvp"
 
 const DefaultWebAddr = "127.0.0.1:18081"
 
+const (
+	peerLatencyProbeInterval = 10 * time.Second
+	peerLatencyProbeTick     = time.Second
+	peerLatencyProbeTimeout  = 3 * time.Second
+)
+
 type Config struct {
 	Server                   string
 	Room                     string
@@ -306,6 +312,7 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 		DisplayName: cfg.DisplayName,
 		MAC:         advertisedMAC,
 		Nonce:       nonce,
+		Features:    []string{protocol.FeaturePeerLatency},
 	}
 	if err := protocol.WriteJSON(controlStream, protocol.TypeJoinRoom, join); err != nil {
 		return err
@@ -353,7 +360,9 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 	defer dataStream.Close()
 	log.Printf("data stream ready room=%q peer=%s", accept.Room, accept.PeerID)
 
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
+	controlWriter := &messageWriter{w: controlStream}
+	latency := newPeerLatencyTracker(status, controlWriter)
 	meta := capture.Metadata{Room: cfg.Room, PeerID: accept.PeerID, PeerName: cfg.DisplayName}
 	switch device.Layer() {
 	case tap.LayerIP:
@@ -372,7 +381,8 @@ func runSession(ctx context.Context, cfg Config, status *Status) error {
 		go readTAP(device, dataStream, status, cfg.Capture, meta, errCh)
 		go writeTAP(device, dataStream, status, cfg.Capture, meta, errCh)
 	}
-	go readControl(controlStream, status, errCh)
+	go latency.run(ctx, errCh)
+	go readControl(controlStream, status, latency, errCh)
 
 	select {
 	case <-ctx.Done():
@@ -403,6 +413,7 @@ type Status struct {
 	updatedAt     time.Time
 	roomCreatedAt time.Time
 	peers         []protocol.PeerInfo
+	peerLatency   map[string]PeerLatency
 
 	rxBytes    atomic.Uint64
 	rxFrames   atomic.Uint64
@@ -412,28 +423,57 @@ type Status struct {
 }
 
 type Snapshot struct {
-	GeneratedAt              time.Time           `json:"generated_at"`
-	Server                   string              `json:"server"`
-	Room                     string              `json:"room"`
-	DisplayName              string              `json:"display_name,omitempty"`
-	DeviceName               string              `json:"device_name,omitempty"`
-	InsecureSkipVerify       bool                `json:"insecure_skip_verify"`
-	PrioritizeVirtualAdapter bool                `json:"prioritize_virtual_adapter"`
-	State                    string              `json:"state"`
-	LastError                string              `json:"last_error,omitempty"`
-	PeerID                   string              `json:"peer_id,omitempty"`
-	IPv4                     string              `json:"ipv4,omitempty"`
-	CIDR                     string              `json:"cidr,omitempty"`
-	MAC                      string              `json:"mac,omitempty"`
-	MTU                      int                 `json:"mtu,omitempty"`
-	JoinedAt                 time.Time           `json:"joined_at,omitempty"`
-	RoomCreatedAt            time.Time           `json:"room_created_at,omitempty"`
-	Peers                    []protocol.PeerInfo `json:"peers,omitempty"`
-	RxBytes                  uint64              `json:"rx_bytes"`
-	RxFrames                 uint64              `json:"rx_frames"`
-	TxBytes                  uint64              `json:"tx_bytes"`
-	TxFrames                 uint64              `json:"tx_frames"`
-	Reconnects               uint64              `json:"reconnects"`
+	GeneratedAt              time.Time      `json:"generated_at"`
+	Server                   string         `json:"server"`
+	Room                     string         `json:"room"`
+	DisplayName              string         `json:"display_name,omitempty"`
+	DeviceName               string         `json:"device_name,omitempty"`
+	InsecureSkipVerify       bool           `json:"insecure_skip_verify"`
+	PrioritizeVirtualAdapter bool           `json:"prioritize_virtual_adapter"`
+	State                    string         `json:"state"`
+	LastError                string         `json:"last_error,omitempty"`
+	PeerID                   string         `json:"peer_id,omitempty"`
+	IPv4                     string         `json:"ipv4,omitempty"`
+	CIDR                     string         `json:"cidr,omitempty"`
+	MAC                      string         `json:"mac,omitempty"`
+	MTU                      int            `json:"mtu,omitempty"`
+	JoinedAt                 time.Time      `json:"joined_at,omitempty"`
+	RoomCreatedAt            time.Time      `json:"room_created_at,omitempty"`
+	Peers                    []PeerSnapshot `json:"peers,omitempty"`
+	RxBytes                  uint64         `json:"rx_bytes"`
+	RxFrames                 uint64         `json:"rx_frames"`
+	TxBytes                  uint64         `json:"tx_bytes"`
+	TxFrames                 uint64         `json:"tx_frames"`
+	Reconnects               uint64         `json:"reconnects"`
+}
+
+type PeerSnapshot struct {
+	ID               string     `json:"id"`
+	DisplayName      string     `json:"display_name,omitempty"`
+	IPv4             string     `json:"ipv4"`
+	MAC              string     `json:"mac"`
+	Features         []string   `json:"features,omitempty"`
+	LatencyMS        *float64   `json:"latency_ms,omitempty"`
+	LatencyState     string     `json:"latency_state,omitempty"`
+	LatencyUpdatedAt *time.Time `json:"latency_updated_at,omitempty"`
+}
+
+type PeerLatency struct {
+	RTT       time.Duration
+	State     string
+	UpdatedAt time.Time
+	Pending   bool
+	ProbeID   string
+	SentAt    time.Time
+	NextProbe time.Time
+	Index     int
+	Order     int64
+}
+
+type peerProbe struct {
+	PeerID string
+	ID     string
+	SentAt time.Time
 }
 
 type sessionLogSnapshot struct {
@@ -491,6 +531,7 @@ func (s *Status) startSession(cfg Config) {
 	s.joinedAt = time.Time{}
 	s.roomCreatedAt = time.Time{}
 	s.peers = nil
+	s.peerLatency = nil
 	s.rxBytes.Store(0)
 	s.rxFrames.Store(0)
 	s.txBytes.Store(0)
@@ -518,6 +559,7 @@ func (s *Status) joined(accept protocol.JoinAccept) {
 	s.mtu = accept.MTU
 	s.roomCreatedAt = accept.RoomCreatedAt
 	s.peers = accept.Peers
+	s.keepLatencyPeersLocked()
 	s.joinedAt = time.Now()
 	s.updatedAt = s.joinedAt
 }
@@ -527,8 +569,117 @@ func (s *Status) updatePeers(pl protocol.PeerList) {
 	defer s.mu.Unlock()
 	s.roomCreatedAt = pl.RoomCreatedAt
 	s.peers = pl.Peers
+	s.keepLatencyPeersLocked()
 	s.updatedAt = time.Now()
 	log.Printf("peer list updated room=%q peer=%s peers=%d", s.room, s.peerID, len(pl.Peers))
+}
+
+func (s *Status) keepLatencyPeersLocked() {
+	if s.peerLatency == nil {
+		s.peerLatency = make(map[string]PeerLatency)
+	}
+	seen := make(map[string]bool, len(s.peers))
+	for i, peer := range s.peers {
+		seen[peer.ID] = true
+		state := s.peerLatency[peer.ID]
+		if state.State == "" {
+			state.State = "unknown"
+		}
+		state.Index = i
+		state.Order = int64(i)
+		s.peerLatency[peer.ID] = state
+	}
+	for peerID := range s.peerLatency {
+		if !seen[peerID] {
+			delete(s.peerLatency, peerID)
+		}
+	}
+}
+
+func (s *Status) nextLatencyProbe(now time.Time) (peerProbe, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != "connected" || s.peerID == "" {
+		return peerProbe{}, false
+	}
+	if s.peerLatency == nil {
+		s.keepLatencyPeersLocked()
+	}
+	bestPeerID := ""
+	bestOrder := int64(0)
+	for _, peer := range s.peers {
+		if peer.ID == s.peerID || !hasFeature(peer.Features, protocol.FeaturePeerLatency) {
+			continue
+		}
+		latency := s.peerLatency[peer.ID]
+		if latency.Pending || latency.NextProbe.After(now) {
+			continue
+		}
+		if bestPeerID == "" || latency.Order < bestOrder {
+			bestPeerID = peer.ID
+			bestOrder = latency.Order
+		}
+	}
+	if bestPeerID == "" {
+		return peerProbe{}, false
+	}
+	probeID, err := nonceHex()
+	if err != nil {
+		return peerProbe{}, false
+	}
+	latency := s.peerLatency[bestPeerID]
+	latency.Pending = true
+	latency.ProbeID = probeID
+	latency.SentAt = now
+	latency.NextProbe = now.Add(peerLatencyProbeInterval)
+	latency.State = "pending"
+	latency.UpdatedAt = now
+	latency.Order = now.UnixNano()
+	s.peerLatency[bestPeerID] = latency
+	s.updatedAt = now
+	return peerProbe{PeerID: bestPeerID, ID: probeID, SentAt: now}, true
+}
+
+func (s *Status) recordLatencyPong(pong protocol.PeerPong, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	latency, ok := s.peerLatency[pong.FromPeerID]
+	if !ok || !latency.Pending || latency.ProbeID != pong.ID {
+		return
+	}
+	latency.RTT = now.Sub(latency.SentAt)
+	latency.State = "ok"
+	latency.UpdatedAt = now
+	latency.Pending = false
+	latency.ProbeID = ""
+	s.peerLatency[pong.FromPeerID] = latency
+	s.updatedAt = now
+}
+
+func (s *Status) expireLatencyProbes(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := false
+	for peerID, latency := range s.peerLatency {
+		if !latency.Pending || now.Sub(latency.SentAt) < peerLatencyProbeTimeout {
+			continue
+		}
+		latency.Pending = false
+		latency.ProbeID = ""
+		latency.State = "timeout"
+		latency.UpdatedAt = now
+		s.peerLatency[peerID] = latency
+		changed = true
+	}
+	if changed {
+		s.updatedAt = now
+	}
+}
+
+func (s *Status) localPeerID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.peerID
 }
 
 func (s *Status) peerMACForIPv4(ip net.IP) net.HardwareAddr {
@@ -569,6 +720,7 @@ func (s *Status) endSession(err error, state string) {
 	s.joinedAt = time.Time{}
 	s.roomCreatedAt = time.Time{}
 	s.peers = nil
+	s.peerLatency = nil
 	s.updatedAt = time.Now()
 }
 
@@ -664,6 +816,28 @@ func (s *Status) recordTx(size int) {
 func (s *Status) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	peers := make([]PeerSnapshot, 0, len(s.peers))
+	for _, peer := range s.peers {
+		peerSnap := PeerSnapshot{
+			ID:          peer.ID,
+			DisplayName: peer.DisplayName,
+			IPv4:        peer.IPv4,
+			MAC:         peer.MAC,
+			Features:    append([]string(nil), peer.Features...),
+		}
+		if latency, ok := s.peerLatency[peer.ID]; ok && latency.State != "" {
+			peerSnap.LatencyState = latency.State
+			if !latency.UpdatedAt.IsZero() {
+				updatedAt := latency.UpdatedAt
+				peerSnap.LatencyUpdatedAt = &updatedAt
+			}
+			if latency.State == "ok" {
+				ms := float64(latency.RTT.Microseconds()) / 1000
+				peerSnap.LatencyMS = &ms
+			}
+		}
+		peers = append(peers, peerSnap)
+	}
 	return Snapshot{
 		GeneratedAt:              time.Now(),
 		Server:                   s.server,
@@ -681,7 +855,7 @@ func (s *Status) Snapshot() Snapshot {
 		MTU:                      s.mtu,
 		JoinedAt:                 s.joinedAt,
 		RoomCreatedAt:            s.roomCreatedAt,
-		Peers:                    s.peers,
+		Peers:                    peers,
 		RxBytes:                  s.rxBytes.Load(),
 		RxFrames:                 s.rxFrames.Load(),
 		TxBytes:                  s.txBytes.Load(),
@@ -745,6 +919,67 @@ func (w *ethernetFrameWriter) WriteFrame(frame []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return protocol.WriteMessage(w.w, protocol.TypeEthernetFrame, frame)
+}
+
+type messageWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (w *messageWriter) WriteJSON(typ protocol.MessageType, value any) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return protocol.WriteJSON(w.w, typ, value)
+}
+
+type peerLatencyTracker struct {
+	status *Status
+	writer *messageWriter
+}
+
+func newPeerLatencyTracker(status *Status, writer *messageWriter) *peerLatencyTracker {
+	return &peerLatencyTracker{status: status, writer: writer}
+}
+
+func (t *peerLatencyTracker) run(ctx context.Context, errCh chan<- error) {
+	ticker := time.NewTicker(peerLatencyProbeTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			t.status.expireLatencyProbes(now)
+			probe, ok := t.status.nextLatencyProbe(now)
+			if !ok {
+				continue
+			}
+			ping := protocol.PeerPing{ID: probe.ID, ToPeerID: probe.PeerID, SentAtUnixNano: probe.SentAt.UnixNano()}
+			if err := t.writer.WriteJSON(protocol.TypePing, ping); err != nil {
+				errCh <- err
+				return
+			}
+		}
+	}
+}
+
+func (t *peerLatencyTracker) handlePing(ping protocol.PeerPing) error {
+	if ping.FromPeerID == "" || ping.ToPeerID != t.status.localPeerID() {
+		return nil
+	}
+	pong := protocol.PeerPong{
+		ID:             ping.ID,
+		ToPeerID:       ping.FromPeerID,
+		SentAtUnixNano: ping.SentAtUnixNano,
+	}
+	return t.writer.WriteJSON(protocol.TypePong, pong)
+}
+
+func (t *peerLatencyTracker) handlePong(pong protocol.PeerPong) {
+	if pong.FromPeerID == "" || pong.ToPeerID != t.status.localPeerID() {
+		return
+	}
+	t.status.recordLatencyPong(pong, time.Now())
 }
 
 func readIPAsEthernet(device io.Reader, writer *ethernetFrameWriter, status *Status, ownMAC net.HardwareAddr, captures *capture.Recorder, meta capture.Metadata, errCh chan<- error) {
@@ -887,7 +1122,7 @@ func arpReply(request []byte, ownMAC net.HardwareAddr, ownIP net.IP) []byte {
 	return reply
 }
 
-func readControl(stream io.Reader, status *Status, errCh chan<- error) {
+func readControl(stream io.Reader, status *Status, latency *peerLatencyTracker, errCh chan<- error) {
 	for {
 		typ, payload, err := protocol.ReadMessage(stream, protocol.MaxControlSize)
 		if err != nil {
@@ -900,8 +1135,40 @@ func readControl(stream io.Reader, status *Status, errCh chan<- error) {
 			if err := json.Unmarshal(payload, &pl); err == nil {
 				status.updatePeers(pl)
 			}
+		case protocol.TypePing:
+			if len(payload) == 0 {
+				continue
+			}
+			var ping protocol.PeerPing
+			if err := json.Unmarshal(payload, &ping); err != nil {
+				errCh <- err
+				return
+			}
+			if err := latency.handlePing(ping); err != nil {
+				errCh <- err
+				return
+			}
+		case protocol.TypePong:
+			if len(payload) == 0 {
+				continue
+			}
+			var pong protocol.PeerPong
+			if err := json.Unmarshal(payload, &pong); err != nil {
+				errCh <- err
+				return
+			}
+			latency.handlePong(pong)
 		}
 	}
+}
+
+func hasFeature(features []string, want string) bool {
+	for _, feature := range features {
+		if feature == want {
+			return true
+		}
+	}
+	return false
 }
 
 func nonceHex() (string, error) {

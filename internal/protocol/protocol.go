@@ -15,6 +15,8 @@ const (
 	DefaultMTU     = 1300
 	MaxFrameSize   = 1600
 	MaxControlSize = 64 * 1024
+
+	FeaturePeerLatency = "peer_latency"
 )
 
 type MessageType byte
@@ -35,11 +37,12 @@ var (
 )
 
 type JoinRoom struct {
-	Version     int    `json:"version"`
-	Room        string `json:"room"`
-	DisplayName string `json:"display_name,omitempty"`
-	MAC         string `json:"mac,omitempty"`
-	Nonce       string `json:"nonce,omitempty"`
+	Version     int      `json:"version"`
+	Room        string   `json:"room"`
+	DisplayName string   `json:"display_name,omitempty"`
+	MAC         string   `json:"mac,omitempty"`
+	Nonce       string   `json:"nonce,omitempty"`
+	Features    []string `json:"features,omitempty"`
 }
 
 type JoinAccept struct {
@@ -52,6 +55,7 @@ type JoinAccept struct {
 	MTU           int        `json:"mtu"`
 	RoomCreatedAt time.Time  `json:"room_created_at,omitempty"`
 	Peers         []PeerInfo `json:"peers,omitempty"`
+	Features      []string   `json:"features,omitempty"`
 }
 
 type JoinReject struct {
@@ -60,10 +64,11 @@ type JoinReject struct {
 
 // PeerInfo carries the identifying fields of a room peer pushed to clients.
 type PeerInfo struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"display_name,omitempty"`
-	IPv4        string `json:"ipv4"`
-	MAC         string `json:"mac"`
+	ID          string   `json:"id"`
+	DisplayName string   `json:"display_name,omitempty"`
+	IPv4        string   `json:"ipv4"`
+	MAC         string   `json:"mac"`
+	Features    []string `json:"features,omitempty"`
 }
 
 // PeerList is broadcast by the server on the control stream whenever the room
@@ -71,6 +76,20 @@ type PeerInfo struct {
 type PeerList struct {
 	RoomCreatedAt time.Time  `json:"room_created_at,omitempty"`
 	Peers         []PeerInfo `json:"peers"`
+}
+
+type PeerPing struct {
+	ID             string `json:"id"`
+	FromPeerID     string `json:"from_peer_id,omitempty"`
+	ToPeerID       string `json:"to_peer_id"`
+	SentAtUnixNano int64  `json:"sent_at_unix_nano,omitempty"`
+}
+
+type PeerPong struct {
+	ID             string `json:"id"`
+	FromPeerID     string `json:"from_peer_id,omitempty"`
+	ToPeerID       string `json:"to_peer_id"`
+	SentAtUnixNano int64  `json:"sent_at_unix_nano,omitempty"`
 }
 
 // MarshalMessage serialises typ+v into the 5-byte-header wire format and

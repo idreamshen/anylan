@@ -26,6 +26,22 @@ func TestMessageRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPeerLatencyPingRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	want := PeerPing{ID: "probe-1", FromPeerID: "peer-a", ToPeerID: "peer-b", SentAtUnixNano: 123}
+	if err := WriteJSON(&buf, TypePing, want); err != nil {
+		t.Fatalf("WriteJSON failed: %v", err)
+	}
+
+	var got PeerPing
+	if err := ReadJSON(&buf, TypePing, MaxControlSize, &got); err != nil {
+		t.Fatalf("ReadJSON failed: %v", err)
+	}
+	if got != want {
+		t.Fatalf("ping = %#v, want %#v", got, want)
+	}
+}
+
 func TestRejectsOversizedEthernetFrame(t *testing.T) {
 	frame := bytes.Repeat([]byte{0xaa}, MaxFrameSize+1)
 	if err := WriteMessage(&bytes.Buffer{}, TypeEthernetFrame, frame); !errors.Is(err, ErrPayloadTooLarge) {

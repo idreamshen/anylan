@@ -59,6 +59,7 @@ type Room struct {
 type Peer struct {
 	ID          string
 	DisplayName string
+	Features    []string
 	Room        *Room
 	IP          netip.Addr
 	MAC         net.HardwareAddr
@@ -85,6 +86,7 @@ type Peer struct {
 type JoinOptions struct {
 	DisplayName  string
 	RequestedMAC net.HardwareAddr
+	Features     []string
 }
 
 type ManagerSnapshot struct {
@@ -103,6 +105,7 @@ type RoomSnapshot struct {
 type PeerSnapshot struct {
 	ID          string    `json:"id"`
 	DisplayName string    `json:"display_name,omitempty"`
+	Features    []string  `json:"features,omitempty"`
 	IP          string    `json:"ip"`
 	MAC         string    `json:"mac"`
 	ConnectedAt time.Time `json:"connected_at"`
@@ -299,6 +302,7 @@ func (r *Room) AddPeer(opts ...JoinOptions) (*Peer, error) {
 	peer := &Peer{
 		ID:          peerID,
 		DisplayName: opt.DisplayName,
+		Features:    append([]string(nil), opt.Features...),
 		Room:        r,
 		IP:          ip,
 		MAC:         mac,
@@ -372,6 +376,21 @@ func (r *Room) BroadcastNotify(msg []byte, exclude *Peer) {
 		case p.Notify <- msg:
 		default:
 		}
+	}
+}
+
+func (r *Room) SendNotify(toPeerID string, msg []byte) bool {
+	r.mu.Lock()
+	peer := r.peers[toPeerID]
+	r.mu.Unlock()
+	if peer == nil {
+		return false
+	}
+	select {
+	case peer.Notify <- append([]byte(nil), msg...):
+		return true
+	default:
+		return false
 	}
 }
 
@@ -497,6 +516,7 @@ func (p *Peer) Snapshot() PeerSnapshot {
 	return PeerSnapshot{
 		ID:          p.ID,
 		DisplayName: p.DisplayName,
+		Features:    append([]string(nil), p.Features...),
 		IP:          p.IP.String(),
 		MAC:         p.MAC.String(),
 		ConnectedAt: p.ConnectedAt,

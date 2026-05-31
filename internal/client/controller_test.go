@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/idreamshen/anylan/internal/protocol"
 	"github.com/idreamshen/anylan/internal/webui"
 )
 
@@ -184,6 +185,55 @@ func TestSessionLogSnapshotKeepsCountersAndPeer(t *testing.T) {
 	}
 	if snap.RxFrames != 1 || snap.RxBytes != 42 || snap.TxFrames != 1 || snap.TxBytes != 98 {
 		t.Fatalf("unexpected snapshot counters: %#v", snap)
+	}
+}
+
+func TestStatusRecordsPeerLatency(t *testing.T) {
+	status := newStatus(Config{Server: "example:4433", Room: "room"})
+	status.joined(protocol.JoinAccept{
+		PeerID: "peer-a",
+		Peers: []protocol.PeerInfo{
+			{ID: "peer-a", IPv4: "10.240.0.2", MAC: "02:00:00:00:00:01", Features: []string{protocol.FeaturePeerLatency}},
+			{ID: "peer-b", IPv4: "10.240.0.3", MAC: "02:00:00:00:00:02", Features: []string{protocol.FeaturePeerLatency}},
+		},
+	})
+	now := time.Now()
+	probe, ok := status.nextLatencyProbe(now)
+	if !ok || probe.PeerID != "peer-b" || probe.ID == "" {
+		t.Fatalf("probe = %#v ok=%v, want peer-b", probe, ok)
+	}
+	status.recordLatencyPong(protocol.PeerPong{ID: probe.ID, FromPeerID: "peer-b", ToPeerID: "peer-a"}, now.Add(25*time.Millisecond))
+
+	snap := status.Snapshot()
+	if len(snap.Peers) != 2 {
+		t.Fatalf("peers = %d, want 2", len(snap.Peers))
+	}
+	if snap.Peers[1].LatencyMS == nil || *snap.Peers[1].LatencyMS != 25 {
+		t.Fatalf("latency = %#v, want 25ms", snap.Peers[1].LatencyMS)
+	}
+	if snap.Peers[1].LatencyState != "ok" {
+		t.Fatalf("latency state = %q, want ok", snap.Peers[1].LatencyState)
+	}
+}
+
+func TestStatusExpiresLatencyProbe(t *testing.T) {
+	status := newStatus(Config{Server: "example:4433", Room: "room"})
+	status.joined(protocol.JoinAccept{
+		PeerID: "peer-a",
+		Peers: []protocol.PeerInfo{
+			{ID: "peer-a", Features: []string{protocol.FeaturePeerLatency}},
+			{ID: "peer-b", Features: []string{protocol.FeaturePeerLatency}},
+		},
+	})
+	now := time.Now()
+	if _, ok := status.nextLatencyProbe(now); !ok {
+		t.Fatal("nextLatencyProbe returned false")
+	}
+	status.expireLatencyProbes(now.Add(peerLatencyProbeTimeout + time.Millisecond))
+
+	snap := status.Snapshot()
+	if snap.Peers[1].LatencyState != "timeout" {
+		t.Fatalf("latency state = %q, want timeout", snap.Peers[1].LatencyState)
 	}
 }
 

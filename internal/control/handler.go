@@ -3,6 +3,7 @@ package control
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -80,6 +81,7 @@ func (h Handler) handleStream(ctx context.Context, conn quic.Connection, control
 	peer, err := h.Manager.Join(join.Room, relay.JoinOptions{
 		DisplayName:  join.DisplayName,
 		RequestedMAC: requestedMAC,
+		Features:     filterSupportedFeatures(join.Features),
 	})
 	if err != nil {
 		logJoinReject(remote, join.Room, err.Error(), err)
@@ -120,6 +122,7 @@ func (h Handler) handleStream(ctx context.Context, conn quic.Connection, control
 		MTU:           h.MTU,
 		RoomCreatedAt: roomSnap.CreatedAt,
 		Peers:         toPeerInfos(roomSnap.Peers),
+		Features:      []string{protocol.FeaturePeerLatency},
 	}
 
 	// controlMu serialises all writes to the control stream (notify goroutine +
@@ -154,6 +157,7 @@ func (h Handler) handleStream(ctx context.Context, conn quic.Connection, control
 	peer.Room.BroadcastNotify(joinMsg, peer)
 
 	writeErr := make(chan error, 1)
+	controlReadErr := make(chan error, 1)
 
 	// Goroutine: forward Ethernet frames from relay to client.
 	go func() {
@@ -186,11 +190,47 @@ func (h Handler) handleStream(ctx context.Context, conn quic.Connection, control
 		}
 	}()
 
+	// Goroutine: read client control messages (e.g. peer latency probes). Writes
+	// to this stream are handled by the notification goroutine and pong replies.
+	go func() {
+		for {
+			typ, payload, err := protocol.ReadMessage(controlStream, protocol.MaxControlSize)
+			if err != nil {
+				controlReadErr <- err
+				return
+			}
+			switch typ {
+			case protocol.TypePing:
+				if len(payload) == 0 {
+					if err := lockedControlWrite(protocol.TypePong, nil); err != nil {
+						controlReadErr <- err
+						return
+					}
+					continue
+				}
+				if err := forwardPeerPing(peer, payload); err != nil {
+					controlReadErr <- err
+					return
+				}
+			case protocol.TypePong:
+				if err := forwardPeerPong(peer, payload); err != nil {
+					controlReadErr <- err
+					return
+				}
+			}
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case err := <-writeErr:
+			return err
+		case err := <-controlReadErr:
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
 			return err
 		default:
 		}
@@ -218,10 +258,6 @@ func (h Handler) handleStream(ctx context.Context, conn quic.Connection, control
 			for _, target := range targets {
 				target.Enqueue(payload)
 			}
-		case protocol.TypePing:
-			if err := lockedControlWrite(protocol.TypePong, payload); err != nil {
-				return err
-			}
 		}
 	}
 }
@@ -235,9 +271,54 @@ func toPeerInfos(peers []relay.PeerSnapshot) []protocol.PeerInfo {
 			DisplayName: p.DisplayName,
 			IPv4:        p.IP,
 			MAC:         p.MAC,
+			Features:    append([]string(nil), p.Features...),
 		})
 	}
 	return out
+}
+
+func filterSupportedFeatures(features []string) []string {
+	out := make([]string, 0, len(features))
+	for _, feature := range features {
+		if feature == protocol.FeaturePeerLatency {
+			out = append(out, feature)
+		}
+	}
+	return out
+}
+
+func forwardPeerPing(from *relay.Peer, payload []byte) error {
+	var ping protocol.PeerPing
+	if err := json.Unmarshal(payload, &ping); err != nil {
+		return err
+	}
+	if ping.ToPeerID == "" || ping.ToPeerID == from.ID {
+		return nil
+	}
+	ping.FromPeerID = from.ID
+	msg, err := protocol.MarshalMessage(protocol.TypePing, ping)
+	if err != nil {
+		return err
+	}
+	from.Room.SendNotify(ping.ToPeerID, msg)
+	return nil
+}
+
+func forwardPeerPong(from *relay.Peer, payload []byte) error {
+	var pong protocol.PeerPong
+	if err := json.Unmarshal(payload, &pong); err != nil {
+		return err
+	}
+	if pong.ToPeerID == "" || pong.ToPeerID == from.ID {
+		return nil
+	}
+	pong.FromPeerID = from.ID
+	msg, err := protocol.MarshalMessage(protocol.TypePong, pong)
+	if err != nil {
+		return err
+	}
+	from.Room.SendNotify(pong.ToPeerID, msg)
+	return nil
 }
 
 // buildPeerListMsg serialises a TypePeerList wire message from a room snapshot.

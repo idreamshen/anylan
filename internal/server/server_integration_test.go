@@ -144,6 +144,48 @@ func TestServerUsesRequestedMAC(t *testing.T) {
 	}
 }
 
+func TestServerForwardsPeerLatencyMessages(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server := Server{InsecureDevCert: true}
+	udpConn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen packet failed: %v", err)
+	}
+	listener, err := server.Listen(ctx, udpConn)
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer listener.Close()
+	go func() {
+		_ = server.Serve(ctx, listener)
+	}()
+
+	a := joinTestClient(t, ctx, listener.Addr().String(), "same")
+	defer a.close()
+	b := joinTestClient(t, ctx, listener.Addr().String(), "same")
+	defer b.close()
+
+	ping := protocol.PeerPing{ID: "probe-1", ToPeerID: b.accept.PeerID, SentAtUnixNano: 123}
+	if err := protocol.WriteJSON(a.stream, protocol.TypePing, ping); err != nil {
+		t.Fatalf("write peer ping failed: %v", err)
+	}
+	gotPing := readPeerPing(t, b.stream)
+	if gotPing.ID != ping.ID || gotPing.FromPeerID != a.accept.PeerID || gotPing.ToPeerID != b.accept.PeerID {
+		t.Fatalf("forwarded ping = %#v", gotPing)
+	}
+
+	pong := protocol.PeerPong{ID: gotPing.ID, ToPeerID: gotPing.FromPeerID, SentAtUnixNano: gotPing.SentAtUnixNano}
+	if err := protocol.WriteJSON(b.stream, protocol.TypePong, pong); err != nil {
+		t.Fatalf("write peer pong failed: %v", err)
+	}
+	gotPong := readPeerPong(t, a.stream)
+	if gotPong.ID != pong.ID || gotPong.FromPeerID != b.accept.PeerID || gotPong.ToPeerID != a.accept.PeerID {
+		t.Fatalf("forwarded pong = %#v", gotPong)
+	}
+}
+
 type testClient struct {
 	conn   quic.Connection
 	stream quic.Stream
@@ -172,7 +214,7 @@ func joinTestClientWithMAC(t *testing.T, ctx context.Context, addr, room, reques
 	if err != nil {
 		t.Fatalf("open stream failed: %v", err)
 	}
-	join := protocol.JoinRoom{Version: protocol.Version, Room: room, MAC: requestedMAC}
+	join := protocol.JoinRoom{Version: protocol.Version, Room: room, MAC: requestedMAC, Features: []string{protocol.FeaturePeerLatency}}
 	if err := protocol.WriteJSON(stream, protocol.TypeJoinRoom, join); err != nil {
 		t.Fatalf("write join failed: %v", err)
 	}
@@ -185,6 +227,61 @@ func joinTestClientWithMAC(t *testing.T, ctx context.Context, addr, room, reques
 		t.Fatalf("open data stream failed: %v", err)
 	}
 	return testClient{conn: conn, stream: stream, data: data, accept: accept}
+}
+
+func readPeerPing(t *testing.T, stream quic.Stream) protocol.PeerPing {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	if err := stream.SetReadDeadline(deadline); err != nil {
+		t.Fatalf("set deadline failed: %v", err)
+	}
+	defer stream.SetReadDeadline(time.Time{})
+	for {
+		typ, payload, err := protocol.ReadMessage(stream, protocol.MaxControlSize)
+		if err != nil {
+			t.Fatalf("read peer ping failed: %v", err)
+		}
+		if typ == protocol.TypePeerList {
+			continue
+		}
+		if typ != protocol.TypePing {
+			t.Fatalf("type = %d, want peer ping", typ)
+		}
+		var ping protocol.PeerPing
+		if err := json.Unmarshal(payload, &ping); err != nil {
+			t.Fatalf("decode peer ping failed: %v", err)
+		}
+		if ping.ID == "" {
+			continue
+		}
+		return ping
+	}
+}
+
+func readPeerPong(t *testing.T, stream quic.Stream) protocol.PeerPong {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	if err := stream.SetReadDeadline(deadline); err != nil {
+		t.Fatalf("set deadline failed: %v", err)
+	}
+	defer stream.SetReadDeadline(time.Time{})
+	for {
+		typ, payload, err := protocol.ReadMessage(stream, protocol.MaxControlSize)
+		if err != nil {
+			t.Fatalf("read peer pong failed: %v", err)
+		}
+		if typ == protocol.TypePeerList {
+			continue
+		}
+		if typ != protocol.TypePong {
+			t.Fatalf("type = %d, want peer pong", typ)
+		}
+		var pong protocol.PeerPong
+		if err := json.Unmarshal(payload, &pong); err != nil {
+			t.Fatalf("decode peer pong failed: %v", err)
+		}
+		return pong
+	}
 }
 
 func readFrame(t *testing.T, stream quic.Stream) []byte {

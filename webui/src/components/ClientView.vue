@@ -39,6 +39,7 @@ const peerHeaders = [
   { title: 'Name / ID', key: 'name' },
   { title: 'Virtual IP', key: 'ipv4' },
   { title: 'MAC', key: 'mac' },
+  { title: 'Latency', key: 'latency' },
 ]
 
 watch(() => props.status, status => {
@@ -156,6 +157,13 @@ function time(value) {
   if (!value || value.startsWith?.('0001-')) return '-'
   return new Date(value).toLocaleString()
 }
+
+function latency(item) {
+  if (Number.isFinite(item.latency_ms)) return `${Math.round(item.latency_ms)} ms`
+  if (item.latency_state === 'pending') return 'probing'
+  if (item.latency_state === 'timeout') return 'timeout'
+  return '-'
+}
 </script>
 
 <template>
@@ -208,6 +216,11 @@ function time(value) {
         <v-card-text>
           <v-data-table :headers="peerHeaders" :items="peers" item-value="id">
             <template #item.name="{ item }">{{ item.display_name || item.id }}</template>
+            <template #item.latency="{ item }">
+              <v-chip :color="item.latency_state === 'timeout' ? 'warning' : 'primary'" size="small" variant="tonal">
+                {{ latency(item) }}
+              </v-chip>
+            </template>
             <template #no-data>No peers</template>
           </v-data-table>
         </v-card-text>
