@@ -26,12 +26,12 @@ it looks like everyone is on the same local network.
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| **Client** | Root privileges (for creating the virtual network adapter) | Root privileges; uses native `utun` without third-party drivers | Administrator shell + [OpenVPN TAP driver](https://community.openvpn.net/openvpn/wiki/ManagingWindowsTAPDrivers) installed |
-| **Server** | Any Linux machine with a public UDP port | Not supported yet | Not supported yet |
+| **Client** | Root privileges (for creating the virtual network adapter) | Root privileges; uses native `utun` without third-party drivers | Administrator shell + [OpenVPN TAP driver](https://community.openvpn.net/openvpn/wiki/ManagingWindowsTAPDrivers) installed, or the MSI installer |
+| **Server** | A reachable UDP port | A reachable UDP port | A reachable UDP port |
 
 Download pre-built binaries from the
 [Releases](https://github.com/idreamshen/anylan/releases) page, or build from
-source (requires Go 1.21+):
+source (requires Go 1.22 and npm):
 
 ```bash
 make build
@@ -65,9 +65,9 @@ For quick testing without real TLS certificates:
 ./out/anylan-server --listen :4433 --insecure-dev-cert --web 127.0.0.1:18080
 ```
 
-The `--web` flag is optional but recommended: it exposes a status page at the
-given address where you can see connected rooms and peers. Use `--web-token` if
-the status page is reachable by anyone else.
+The server WebUI is enabled by default on port `18080`; set `--web` to choose a
+different address or `--web ""` to disable it. Use `--web-token` if the status
+page is reachable by anyone else.
 
 ### 2. Join a Room
 
@@ -131,7 +131,7 @@ stop the client and clean up.
 | `--insecure-dev-cert` | `false` | Use a throwaway self-signed certificate |
 | `--pool` | `10.240.0.0/12` | IP pool for virtual addresses |
 | `--mtu` | `1300` | MTU announced to clients |
-| `--web` | | Start a local HTTP status page, e.g. `127.0.0.1:18080` |
+| `--web` | `:18080` | HTTP status page listen address; use `""` to disable |
 | `--web-token` | | Bearer token required for the HTTP status page |
 
 ## Troubleshooting
@@ -162,13 +162,17 @@ make build-darwin  # cross-compile Darwin/macOS binaries (amd64 + arm64)
 make clean         # remove built binaries
 ```
 
+The Makefile runs `npm --prefix webui ci` and `npm --prefix webui run build`
+before Go builds/tests so the embedded WebUI files under `internal/webui/dist`
+are current.
+
 Cross-compiled outputs are named by role, OS, and architecture:
 `anylan-client-linux-amd64`, `anylan-server-linux-amd64`,
 `anylan-client-windows-amd64.exe`, `anylan-server-windows-amd64.exe`,
 `anylan-client-darwin-amd64`, `anylan-client-darwin-arm64`,
 `anylan-server-darwin-amd64`, and `anylan-server-darwin-arm64`.
 
-Or directly with Go:
+Or directly with Go when the embedded WebUI assets already exist:
 
 ```bash
 go test ./...
