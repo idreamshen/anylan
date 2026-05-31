@@ -58,7 +58,7 @@
 
     <CustomAction Id="CreateTapAdapter" FileRef="AnyLANTapSetupExe" ExeCommand="ensure" Execute="deferred" Return="check" Impersonate="no" />
     <InstallExecuteSequence>
-      <Custom Action="CreateTapAdapter" After="tap0901_Process"><![CDATA[NOT REMOVE~="ALL"]]></Custom>
+      <Custom Action="CreateTapAdapter" After="tap0901_Process" Condition="NOT REMOVE~=&quot;ALL&quot;" />
     </InstallExecuteSequence>
 
     <Feature Id="Complete" Title="AnyLAN Client" Level="1">
