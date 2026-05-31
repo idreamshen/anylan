@@ -38,9 +38,6 @@ type Config struct {
 	DeviceName               string
 	InsecureSkipVerify       bool
 	PrioritizeVirtualAdapter bool
-	WebAddr                  string
-	WebToken                 string
-	Logs                     *logmem.Recorder
 	Capture                  *capture.Recorder
 }
 
@@ -51,40 +48,6 @@ type JoinRequest struct {
 	DeviceName               string `json:"device_name"`
 	InsecureSkipVerify       bool   `json:"insecure_skip_verify"`
 	PrioritizeVirtualAdapter bool   `json:"prioritize_virtual_adapter"`
-}
-
-func Run(ctx context.Context, cfg Config) error {
-	if err := normalizeConfig(&cfg); err != nil {
-		return err
-	}
-
-	status := newStatus(cfg)
-	if cfg.WebAddr != "" && cfg.Capture == nil {
-		cfg.Capture = capture.NewRecorder(capture.DefaultLimit)
-	}
-	if cfg.WebAddr != "" {
-		go func() {
-			server := webui.Server{
-				Addr:     cfg.WebAddr,
-				Title:    "anylan client",
-				Token:    cfg.WebToken,
-				Snapshot: func() any { return status.Snapshot() },
-			}
-			if cfg.Logs != nil {
-				server.Logs = func() any { return cfg.Logs.Snapshot() }
-			}
-			if cfg.Capture != nil {
-				server.Capture = func() any { return cfg.Capture.Snapshot() }
-				server.CaptureEnable = captureEnableHandler(cfg.Capture)
-				server.CaptureDisable = captureDisableHandler(cfg.Capture)
-			}
-			err := server.ListenAndServe(ctx)
-			if err != nil && ctx.Err() == nil {
-				log.Printf("web UI error: %v", err)
-			}
-		}()
-	}
-	return runLoop(ctx, cfg, status)
 }
 
 func RunControl(ctx context.Context, webAddr, webToken string, logs *logmem.Recorder) error {

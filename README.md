@@ -106,12 +106,6 @@ To bind the WebUI to another address or port:
 sudo ./out/anylan-client --web 0.0.0.0:18081 --web-token change-me
 ```
 
-The old command-line join mode is still available for scripts:
-
-```bash
-sudo ./out/anylan-client join --server your-server-ip:4433 --room my-room
-```
-
 Each client gets a virtual IP like `10.240.x.y`. Once everyone has joined,
 launch your game and look for LAN/local games -- you should see each other.
 
@@ -126,18 +120,6 @@ stop the client and clean up.
 |---|---|---|
 | `--web` | `127.0.0.1:18081` | Client control WebUI listen address |
 | `--web-token` | | Bearer token required for the client WebUI |
-
-The `join` subcommand accepts these options:
-
-| Flag | Default | Description |
-|---|---|---|
-| `--server` | *(required)* | Server address, e.g. `1.2.3.4:4433` |
-| `--room` | *(required)* | Room code to join |
-| `--name` | | Display name shown to other players |
-| `--dev` | `anylan0` on Linux, auto on macOS/Windows | Virtual network adapter name (on macOS, leave empty to auto-create `utun`; on Windows, the TAP adapter friendly name, e.g. `"Ethernet 3"`) |
-| `--insecure-skip-verify` | `false` | Skip TLS certificate check (for testing only) |
-| `--web` | | Start a local HTTP status page, e.g. `127.0.0.1:18081` |
-| `--web-token` | | Bearer token required for the HTTP status page |
 
 ## Server Options
 

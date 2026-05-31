@@ -11,15 +11,10 @@ import (
 
 	"github.com/idreamshen/anylan/internal/client"
 	"github.com/idreamshen/anylan/internal/logmem"
-	"github.com/idreamshen/anylan/internal/tap"
 )
 
 func main() {
 	logs := logmem.InstallDefault(logmem.DefaultLimit)
-	if len(os.Args) >= 2 && os.Args[1] == "join" {
-		runJoin(logs)
-		return
-	}
 	runControl(logs)
 }
 
@@ -30,7 +25,6 @@ func runControl(logs *logmem.Recorder) {
 	_ = fs.Parse(os.Args[1:])
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: anylan-client [--web 127.0.0.1:18081] [--web-token token]")
-		fmt.Fprintln(os.Stderr, "       anylan-client join --server host:4433 --room room-code [--dev tap-device]")
 		os.Exit(2)
 	}
 
@@ -38,37 +32,6 @@ func runControl(logs *logmem.Recorder) {
 	defer stop()
 
 	if err := client.RunControl(ctx, *web, *webToken, logs); err != nil && ctx.Err() == nil {
-		log.Fatal(err)
-	}
-}
-
-func runJoin(logs *logmem.Recorder) {
-	fs := flag.NewFlagSet("join", flag.ExitOnError)
-	server := fs.String("server", "", "anylan-server address")
-	room := fs.String("room", "", "room code")
-	name := fs.String("name", "", "optional display name")
-	dev := fs.String("dev", tap.DefaultDeviceName(), "TAP device name")
-	insecureSkipVerify := fs.Bool("insecure-skip-verify", false, "skip server certificate verification for local development")
-	prioritizeVirtualAdapter := fs.Bool("prioritize-virtual-adapter", true, "prefer the virtual adapter for room traffic")
-	web := fs.String("web", "", "HTTP status listen address")
-	webToken := fs.String("web-token", "", "bearer token required for the HTTP status page")
-	_ = fs.Parse(os.Args[2:])
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	cfg := client.Config{
-		Server:                   *server,
-		Room:                     *room,
-		DisplayName:              *name,
-		DeviceName:               *dev,
-		InsecureSkipVerify:       *insecureSkipVerify,
-		PrioritizeVirtualAdapter: *prioritizeVirtualAdapter,
-		WebAddr:                  *web,
-		WebToken:                 *webToken,
-		Logs:                     logs,
-	}
-	if err := client.Run(ctx, cfg); err != nil && ctx.Err() == nil {
 		log.Fatal(err)
 	}
 }

@@ -215,28 +215,32 @@ function time(value) {
 
       <v-window-item value="connect">
         <v-card-text>
+          <v-alert v-if="busy" type="info" variant="tonal" class="mb-4">
+            Leave the current room before changing connection settings.
+          </v-alert>
           <v-form @submit.prevent="join">
             <v-row>
               <v-col cols="12" md="6" lg="4">
-                <v-text-field v-model="form.server_host" label="Server host" placeholder="your-server" @update:model-value="markTouched('server_host')" />
+                <v-text-field v-model="form.server_host" label="Server host" placeholder="your-server" :disabled="busy" @update:model-value="markTouched('server_host')" />
               </v-col>
               <v-col cols="12" md="6" lg="4">
-                <v-text-field v-model="form.server_port" label="Server port" placeholder="4433" @update:model-value="markTouched('server_port')" />
+                <v-text-field v-model="form.server_port" label="Server port" placeholder="4433" :disabled="busy" @update:model-value="markTouched('server_port')" />
               </v-col>
               <v-col cols="12" md="6" lg="4">
-                <v-text-field v-model="form.room" label="Room" placeholder="room code" @update:model-value="markTouched('room')" />
+                <v-text-field v-model="form.room" label="Room" placeholder="room code" :disabled="busy" @update:model-value="markTouched('room')" />
               </v-col>
               <v-col cols="12" md="6" lg="4">
-                <v-text-field v-model="form.display_name" label="Name" placeholder="shown to peers" @update:model-value="markTouched('display_name')" />
+                <v-text-field v-model="form.display_name" label="Name" placeholder="shown to peers" :disabled="busy" @update:model-value="markTouched('display_name')" />
               </v-col>
               <v-col cols="12" md="6" lg="4">
-                <v-select v-model="form.device_name" :items="deviceItems" label="Virtual adapter" @update:model-value="markTouched('device_name')" />
+                <v-select v-model="form.device_name" :items="deviceItems" label="Virtual adapter" :disabled="busy" @update:model-value="markTouched('device_name')" />
               </v-col>
               <v-col cols="12" md="6" lg="4">
                 <v-switch
                   v-model="form.prioritize_virtual_adapter"
                   color="primary"
                   density="comfortable"
+                  :disabled="busy"
                   hide-details="auto"
                   label="Prioritize virtual adapter"
                   hint="Set metric to 1 on macOS/Windows so room traffic prefers anylan."

@@ -5,7 +5,7 @@
 # Flow:
 #   1. Build client + server, scp client to the two remotes.
 #   2. Install any missing tooling on the remotes (apt).
-#   3. Start the relay locally; start a client on each remote.
+#   3. Start the relay locally; start a WebUI-controlled client on each remote.
 #   4. Discover the virtual IP/MAC of each peer.
 #   5. Run a sequence of L2-level checks:
 #        T1 baseline ICMP
@@ -75,6 +75,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CLIENT_BIN="/tmp/anylan-client"
 SERVER_BIN="/tmp/anylan-server"
 REMOTE_CLIENT="/tmp/anylan-client"
+REMOTE_WEB="127.0.0.1:18081"
 
 SSH_OPTS="-o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=5"
 
@@ -107,7 +108,12 @@ cleanup() {
   fi
   log "cleaning up"
   for R in "$REMOTE1" "$REMOTE2"; do
-    ssh $SSH_OPTS "$R" "pkill -TERM -f 'anylan-client join' >/dev/null 2>&1 || true" || true
+    ssh $SSH_OPTS "$R" "python3 - <<'PY' >/dev/null 2>&1 || true
+import urllib.request
+req = urllib.request.Request('http://$REMOTE_WEB/api/leave', data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
+urllib.request.urlopen(req, timeout=2).read()
+PY
+pkill -TERM -x anylan-client >/dev/null 2>&1 || true" || true
   done
   sleep 1
   for R in "$REMOTE1" "$REMOTE2"; do
@@ -147,9 +153,9 @@ log "=== build ==="
 log "=== scp client to remotes ==="
 for R in "$REMOTE1" "$REMOTE2"; do
   # Kill any leftover client first to avoid "text file busy".
-  ssh $SSH_OPTS "$R" "pkill -TERM -f 'anylan-client join' >/dev/null 2>&1 || true; \
-                       ip link show $DEV >/dev/null 2>&1 && ip link delete $DEV || true; \
-                       sleep 1" || true
+  ssh $SSH_OPTS "$R" "pkill -TERM -x anylan-client >/dev/null 2>&1 || true; \
+                        ip link show $DEV >/dev/null 2>&1 && ip link delete $DEV || true; \
+                        sleep 1" || true
   scp $SSH_OPTS "$CLIENT_BIN" "$R:$REMOTE_CLIENT" >/dev/null \
     || die "scp to $R failed"
   ssh $SSH_OPTS "$R" "chmod +x $REMOTE_CLIENT" || die "chmod failed on $R"
@@ -195,15 +201,46 @@ log "relay pid=$RELAY_PID log=$LOGDIR/relay.log"
 start_client() {
   # start_client <remote> <name> <room>
   local R="$1" NAME="$2" RM="$3"
-  ssh -f $SSH_OPTS "$R" "
-    nohup $REMOTE_CLIENT join \
-      --server $RELAY_IP:$RELAY_PORT \
-      --room $RM \
-      --dev $DEV \
-      --name $NAME \
-      --insecure-skip-verify \
-      </dev/null >/tmp/anylan-client.log 2>&1 &
-  " || die "failed to start client on $R"
+  if ! ssh $SSH_OPTS "$R" "pgrep -x anylan-client >/dev/null"; then
+    ssh -n -f $SSH_OPTS "$R" "nohup $REMOTE_CLIENT --web $REMOTE_WEB >/tmp/anylan-client.log 2>&1 </dev/null &" \
+      || die "failed to start client WebUI on $R"
+  fi
+  wait_for_web "$R" || die "client WebUI did not start on $R"
+  ssh $SSH_OPTS "$R" "timeout 15 python3 - '$RELAY_IP:$RELAY_PORT' '$RM' '$NAME' '$DEV' <<'PY'
+import json, sys, urllib.request
+payload = {
+    'server': sys.argv[1],
+    'room': sys.argv[2],
+    'display_name': sys.argv[3],
+    'device_name': sys.argv[4],
+    'insecure_skip_verify': True,
+    'prioritize_virtual_adapter': True,
+}
+req = urllib.request.Request(
+    'http://$REMOTE_WEB/api/join',
+    data=json.dumps(payload).encode(),
+    headers={'Content-Type': 'application/json'},
+    method='POST',
+)
+urllib.request.urlopen(req, timeout=10).read()
+PY
+  " || { fetch_client_log "$R" "$NAME"; die "failed to join client on $R; see $LOGDIR/$NAME.log"; }
+}
+
+wait_for_web() {
+  local R="$1" tries=0
+  while [ $tries -lt 20 ]; do
+    if ssh $SSH_OPTS "$R" "python3 - <<'PY' >/dev/null 2>&1
+import urllib.request
+urllib.request.urlopen('http://$REMOTE_WEB/api/status', timeout=1).read()
+PY
+    "; then
+      return 0
+    fi
+    sleep 0.5
+    tries=$((tries+1))
+  done
+  return 1
 }
 
 wait_for_tap() {
@@ -230,7 +267,12 @@ wait_for_tap() {
 
 stop_client() {
   local R="$1"
-  ssh $SSH_OPTS "$R" "pkill -TERM -f 'anylan-client join' >/dev/null 2>&1 || true" || true
+  ssh $SSH_OPTS "$R" "python3 - <<'PY' >/dev/null 2>&1 || true
+import urllib.request
+req = urllib.request.Request('http://$REMOTE_WEB/api/leave', data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
+urllib.request.urlopen(req, timeout=2).read()
+PY
+  " || true
   sleep 1
   ssh $SSH_OPTS "$R" "ip link show $DEV >/dev/null 2>&1 && ip link delete $DEV || true" || true
 }
@@ -260,7 +302,7 @@ log "peer2: $REMOTE2  IP=$IP2  MAC=$MAC2"
 # Returns: 0 if a packet matched, 1 if timeout (no match), 2 on error.
 capture_on_peer2() {
   local filter="$1" outfile="$2"
-  ssh $SSH_OPTS "$REMOTE2" "timeout 4 tcpdump -i $DEV -e -nn -l -c 1 $filter" \
+  ssh $SSH_OPTS "$REMOTE2" "timeout 4 tcpdump -i $DEV -y EN10MB -e -nn -l -c 1 $filter" \
     >"$outfile" 2>>"$outfile.err"
   local rc=$?
   # tcpdump exits 0 if it captured -c packets; timeout exits 124 if it killed
@@ -278,7 +320,7 @@ capture_silence_on_peer2() {
   local filter="$1" outfile="$2"
   # -c 1 causes tcpdump to exit immediately upon capture; otherwise timeout
   # kills it after 3s. We invert: success means timeout fired with no capture.
-  ssh $SSH_OPTS "$REMOTE2" "timeout 3 tcpdump -i $DEV -e -nn -l -c 1 $filter" \
+  ssh $SSH_OPTS "$REMOTE2" "timeout 3 tcpdump -i $DEV -y EN10MB -e -nn -l -c 1 $filter" \
     >"$outfile" 2>>"$outfile.err"
   local rc=$?
   case $rc in

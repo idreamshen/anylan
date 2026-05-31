@@ -55,14 +55,10 @@ Start a local relay with an ephemeral self-signed certificate:
 go run ./cmd/server --listen :4433 --insecure-dev-cert
 ```
 
-Join from a Linux client:
+Start the client WebUI from a Linux client, then join from the WebUI:
 
 ```bash
-sudo go run ./cmd/client -- join \
-  --server 127.0.0.1:4433 \
-  --room my-room \
-  --dev anylan0 \
-  --insecure-skip-verify
+sudo go run ./cmd/client -- --web 0.0.0.0:18081
 ```
 
 For production-like TLS testing, pass `--tls-cert` and `--tls-key` to the server and omit `--insecure-skip-verify` on clients.
@@ -72,7 +68,7 @@ For production-like TLS testing, pass `--tls-cert` and `--tls-key` to the server
 For end-to-end verification, use two Linux client machines:
 
 1. Start `anylan-server` on a reachable UDP port.
-2. Start `anylan-client join` on both clients with the same room code.
+2. Start `anylan-client` on both clients and join from the WebUI with the same room code.
 3. Confirm both TAP interfaces receive `10.240.x.y/24` addresses.
 4. Ping the peer virtual IP in both directions.
 5. Start a LAN-discovery game and verify discovery or direct joining works.
@@ -118,16 +114,17 @@ scp /tmp/anylan-client root@192.168.89.152:/tmp/anylan-client
 /tmp/anylan-server --listen :4433 --insecure-dev-cert
 ```
 
-Then, in separate sessions:
+Then start client WebUIs on both hosts:
 
 ```bash
-ssh -tt root@192.168.89.175 '/tmp/anylan-client join --server <relay-ip>:4433 --room manual-smoke --dev anylan0 --name test1 --insecure-skip-verify'
-ssh -tt root@192.168.89.152 '/tmp/anylan-client join --server <relay-ip>:4433 --room manual-smoke --dev anylan0 --name test2 --insecure-skip-verify'
+ssh root@192.168.89.175 'nohup /tmp/anylan-client --web 0.0.0.0:18081 >/tmp/anylan-client.log 2>&1 &'
+ssh root@192.168.89.152 'nohup /tmp/anylan-client --web 0.0.0.0:18081 >/tmp/anylan-client.log 2>&1 &'
 ```
 
-Confirm both clients receive `10.240.x.y/24` addresses, then ping each virtual IP
-from the other test server. Stop the client sessions with `Ctrl-C` and confirm no
-`/tmp/anylan-client join` process or `anylan0` device is left behind.
+Open each client WebUI or use `/api/join` to join room `manual-smoke`. Confirm
+both clients receive `10.240.x.y/24` addresses, then ping each virtual IP from
+the other test server. Use the WebUI Leave button or `/api/leave` to stop the
+session and confirm no `anylan0` device is left behind.
 
 ### Automated L2 smoke test
 
