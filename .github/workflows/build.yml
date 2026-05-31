@@ -159,10 +159,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
-      - run: gh run download "${{ github.run_id }}" --dir out
+      - run: gh run download "${{ github.run_id }}" --pattern 'anylan-*' --dir out
         env:
           GH_TOKEN: ${{ github.token }}
       - uses: softprops/action-gh-release@v2
         with:
-          files: out/anylan-*
+          files: out/*/*
           generate_release_notes: true
