@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -51,6 +53,108 @@ func TestNormalizeConfigTrimsAndDefaults(t *testing.T) {
 	}
 	if cfg.DeviceName == "" {
 		t.Fatal("DeviceName was not defaulted")
+	}
+}
+
+func TestControllerDefaultsPrioritizeVirtualAdapter(t *testing.T) {
+	controller := NewControllerWithConfig(context.Background(), filepath.Join(t.TempDir(), "missing", "client.json"))
+
+	snap := controller.Snapshot()
+	if !snap.PrioritizeVirtualAdapter {
+		t.Fatal("PrioritizeVirtualAdapter default = false, want true")
+	}
+}
+
+func TestControllerLoadsLocalConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "client.json")
+	prioritize := false
+	stored := localClientConfig{
+		Server:                   "server.example:4433",
+		Room:                     "room-a",
+		DisplayName:              "alice",
+		DeviceName:               "tap-test",
+		InsecureSkipVerify:       true,
+		PrioritizeVirtualAdapter: &prioritize,
+	}
+	data, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	controller := NewControllerWithConfig(context.Background(), path)
+	snap := controller.Snapshot()
+	if snap.Server != stored.Server || snap.Room != stored.Room || snap.DisplayName != stored.DisplayName || snap.DeviceName != stored.DeviceName {
+		t.Fatalf("loaded snapshot = %+v", snap)
+	}
+	if !snap.InsecureSkipVerify {
+		t.Fatal("InsecureSkipVerify was not loaded")
+	}
+	if snap.PrioritizeVirtualAdapter {
+		t.Fatal("PrioritizeVirtualAdapter = true, want loaded false")
+	}
+}
+
+func TestSaveAndLoadClientConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "client.json")
+	cfg := Config{
+		Server:                   "server.example:4433",
+		Room:                     "room-a",
+		DisplayName:              "alice",
+		DeviceName:               "tap-test",
+		InsecureSkipVerify:       true,
+		PrioritizeVirtualAdapter: false,
+	}
+	if err := saveClientConfig(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	loaded, err := loadClientConfig(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if loaded.Server != cfg.Server || loaded.Room != cfg.Room || loaded.DisplayName != cfg.DisplayName || loaded.DeviceName != cfg.DeviceName {
+		t.Fatalf("loaded config = %+v", loaded)
+	}
+	if !loaded.InsecureSkipVerify {
+		t.Fatal("InsecureSkipVerify was not preserved")
+	}
+	if loaded.PrioritizeVirtualAdapter {
+		t.Fatal("PrioritizeVirtualAdapter = true, want saved false")
+	}
+}
+
+func TestControllerJoinSavesLocalConfig(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	path := filepath.Join(t.TempDir(), "client.json")
+	controller := NewControllerWithConfig(ctx, path)
+	payload := json.RawMessage(`{
+		"server":"127.0.0.1:1",
+		"room":"room-a",
+		"display_name":"alice",
+		"device_name":"tap-test",
+		"insecure_skip_verify":true,
+		"prioritize_virtual_adapter":false
+	}`)
+
+	if _, err := controller.Join(context.Background(), payload); err != nil {
+		t.Fatalf("Join failed: %v", err)
+	}
+	_, _ = controller.Leave(context.Background(), nil)
+	loaded, err := loadClientConfig(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if loaded.Server != "127.0.0.1:1" || loaded.Room != "room-a" || loaded.DisplayName != "alice" || loaded.DeviceName != "tap-test" {
+		t.Fatalf("loaded config = %+v", loaded)
+	}
+	if !loaded.InsecureSkipVerify {
+		t.Fatal("InsecureSkipVerify was not saved")
+	}
+	if loaded.PrioritizeVirtualAdapter {
+		t.Fatal("PrioritizeVirtualAdapter = true, want saved false")
 	}
 }
 

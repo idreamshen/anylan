@@ -22,7 +22,7 @@ const form = reactive({
   room: '',
   display_name: '',
   device_name: '',
-  prioritize_virtual_adapter: false,
+  prioritize_virtual_adapter: true,
 })
 
 const busy = computed(() => ['starting', 'connecting', 'connected', 'reconnecting', 'leaving'].includes(props.status.state || ''))

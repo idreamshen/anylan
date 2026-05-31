@@ -155,20 +155,29 @@ func configFromJoinRequest(req JoinRequest) Config {
 }
 
 type Controller struct {
-	ctx     context.Context
-	mu      sync.Mutex
-	status  *Status
-	capture *capture.Recorder
-	cancel  context.CancelFunc
-	done    chan struct{}
+	ctx        context.Context
+	mu         sync.Mutex
+	status     *Status
+	capture    *capture.Recorder
+	configPath string
+	cancel     context.CancelFunc
+	done       chan struct{}
 }
 
 func NewController(ctx context.Context) *Controller {
+	return NewControllerWithConfig(ctx, "")
+}
+
+func NewControllerWithConfig(ctx context.Context, configPath string) *Controller {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	cfg := Config{DeviceName: tap.DefaultDeviceName()}
-	return &Controller{ctx: ctx, status: newIdleStatus(cfg)}
+	cfg, err := loadClientConfig(configPath)
+	if err != nil {
+		log.Printf("load client config failed: %v", err)
+		cfg = defaultControlConfig()
+	}
+	return &Controller{ctx: ctx, status: newIdleStatus(cfg), configPath: configPath}
 }
 
 func (c *Controller) Snapshot() Snapshot {
@@ -202,6 +211,10 @@ func (c *Controller) Join(_ context.Context, payload json.RawMessage) (any, erro
 		c.mu.Unlock()
 		log.Printf("join rejected room=%q reason=%q", cfg.Room, "already joined")
 		return nil, webui.APIError{Status: http.StatusConflict, Message: "already joined; leave the current room first"}
+	}
+	if err := saveClientConfig(c.configPath, cfg); err != nil {
+		c.mu.Unlock()
+		return nil, webui.APIError{Status: http.StatusInternalServerError, Message: fmt.Sprintf("save client config: %v", err)}
 	}
 	sessionCtx, cancel := context.WithCancel(c.ctx)
 	done := make(chan struct{})

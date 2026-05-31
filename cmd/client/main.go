@@ -49,6 +49,7 @@ func runJoin(logs *logmem.Recorder) {
 	name := fs.String("name", "", "optional display name")
 	dev := fs.String("dev", tap.DefaultDeviceName(), "TAP device name")
 	insecureSkipVerify := fs.Bool("insecure-skip-verify", false, "skip server certificate verification for local development")
+	prioritizeVirtualAdapter := fs.Bool("prioritize-virtual-adapter", true, "prefer the virtual adapter for room traffic")
 	web := fs.String("web", "", "HTTP status listen address")
 	webToken := fs.String("web-token", "", "bearer token required for the HTTP status page")
 	_ = fs.Parse(os.Args[2:])
@@ -57,14 +58,15 @@ func runJoin(logs *logmem.Recorder) {
 	defer stop()
 
 	cfg := client.Config{
-		Server:             *server,
-		Room:               *room,
-		DisplayName:        *name,
-		DeviceName:         *dev,
-		InsecureSkipVerify: *insecureSkipVerify,
-		WebAddr:            *web,
-		WebToken:           *webToken,
-		Logs:               logs,
+		Server:                   *server,
+		Room:                     *room,
+		DisplayName:              *name,
+		DeviceName:               *dev,
+		InsecureSkipVerify:       *insecureSkipVerify,
+		PrioritizeVirtualAdapter: *prioritizeVirtualAdapter,
+		WebAddr:                  *web,
+		WebToken:                 *webToken,
+		Logs:                     logs,
 	}
 	if err := client.Run(ctx, cfg); err != nil && ctx.Err() == nil {
 		log.Fatal(err)
