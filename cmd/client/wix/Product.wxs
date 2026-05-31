@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package
       Name="AnyLAN Client"
       Manufacturer="AnyLAN"
@@ -9,8 +9,13 @@
       InstallerVersion="500"
       Compressed="yes">
 
+    <Launch Condition="Privileged" Message="AnyLAN Client must be installed with administrator privileges." />
     <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of AnyLAN Client is already installed." />
     <Media Id="1" Cabinet="anylan.cab" EmbedCab="yes" />
+    <Icon Id="AnyLANIcon" SourceFile="$(var.IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="AnyLANIcon" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseFile)" />
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="AnyLAN">
@@ -20,7 +25,27 @@
               Source="$(var.ClientExe)"
               Name="anylan-client.exe"
               KeyPath="yes" />
+          <Shortcut Id="DesktopShortcut" Directory="DesktopFolder" Name="AnyLAN Client" Icon="AnyLANIcon" WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
         </Component>
+
+        <Component Id="TapSetupComponent" Guid="{294B17BA-64C0-45F7-9CD4-2D7134BA86C5}">
+          <File
+              Id="AnyLANTapSetupExe"
+              Source="$(var.TapSetupExe)"
+              Name="anylan-tapsetup.exe"
+              KeyPath="yes" />
+        </Component>
+
+        <Directory Id="TapWindows6Folder" Name="tap-windows6">
+          <Directory Id="TapWindows6Amd64Folder" Name="amd64">
+            <Component Id="TapWindows6DriverFilesComponent" Guid="{18B0168F-8C1F-4034-B934-5D08ED505E6D}">
+              <File Id="TapOemVistaInf" Source="$(var.TapDriverDir)\OemVista.inf" />
+              <File Id="Tap0901Cat" Source="$(var.TapDriverDir)\tap0901.cat" />
+              <File Id="Tap0901Sys" Source="$(var.TapDriverDir)\tap0901.sys" />
+              <File Id="TapDevconExe" Source="$(var.TapDriverDir)\devcon.exe" KeyPath="yes" />
+            </Component>
+          </Directory>
+        </Directory>
 
         <Merge
             Id="TapWindowsDriver"
@@ -29,9 +54,17 @@
             DiskId="1" />
       </Directory>
     </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+
+    <CustomAction Id="CreateTapAdapter" FileRef="AnyLANTapSetupExe" ExeCommand="ensure" Execute="deferred" Return="check" Impersonate="no" />
+    <InstallExecuteSequence>
+      <Custom Action="CreateTapAdapter" After="tap0901_Process"><![CDATA[NOT REMOVE~="ALL"]]></Custom>
+    </InstallExecuteSequence>
 
     <Feature Id="Complete" Title="AnyLAN Client" Level="1">
       <ComponentRef Id="AnyLANClientComponent" />
+      <ComponentRef Id="TapSetupComponent" />
+      <ComponentRef Id="TapWindows6DriverFilesComponent" />
       <MergeRef Id="TapWindowsDriver" />
     </Feature>
   </Package>
