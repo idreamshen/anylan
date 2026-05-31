@@ -22,14 +22,17 @@ build-linux: webui-build
 	GOOS=linux GOARCH=amd64 go build -o $(OUT_DIR)/anylan-client-linux-amd64 ./cmd/client
 	GOOS=linux GOARCH=amd64 go build -o $(OUT_DIR)/anylan-server-linux-amd64 ./cmd/server
 
-## cross-compile the client for Windows (amd64)
+## cross-compile Windows binaries (amd64)
 build-windows: webui-build
 	GOOS=windows GOARCH=amd64 go build -o $(OUT_DIR)/anylan-client-windows-amd64.exe ./cmd/client
+	GOOS=windows GOARCH=amd64 go build -o $(OUT_DIR)/anylan-server-windows-amd64.exe ./cmd/server
 
-## cross-compile the client for Darwin/macOS (amd64 + arm64)
+## cross-compile Darwin/macOS binaries (amd64 + arm64)
 build-darwin: webui-build
 	GOOS=darwin GOARCH=amd64 go build -o $(OUT_DIR)/anylan-client-darwin-amd64 ./cmd/client
 	GOOS=darwin GOARCH=arm64 go build -o $(OUT_DIR)/anylan-client-darwin-arm64 ./cmd/client
+	GOOS=darwin GOARCH=amd64 go build -o $(OUT_DIR)/anylan-server-darwin-amd64 ./cmd/server
+	GOOS=darwin GOARCH=arm64 go build -o $(OUT_DIR)/anylan-server-darwin-arm64 ./cmd/server
 
 test: webui-build
 	go test ./...

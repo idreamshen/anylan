@@ -21,13 +21,18 @@ jobs:
       - name: Test
         run: make test
 
-      - name: Upload artifacts
+      - name: Upload Linux client
         uses: actions/upload-artifact@v4
         with:
-          name: anylan-linux-amd64
-          path: |
-            out/anylan-client-linux-amd64
-            out/anylan-server-linux-amd64
+          name: anylan-client-linux-amd64
+          path: out/anylan-client-linux-amd64
+          retention-days: 7
+
+      - name: Upload Linux server
+        uses: actions/upload-artifact@v4
+        with:
+          name: anylan-server-linux-amd64
+          path: out/anylan-server-linux-amd64
           retention-days: 7
 
   windows:
@@ -53,11 +58,22 @@ jobs:
         shell: pwsh
         run: ./scripts/build-windows-msi.ps1
 
-      - name: Upload artifacts
+      - name: Build Windows server
+        shell: pwsh
+        run: go build -o out/anylan-server-windows-amd64.exe ./cmd/server
+
+      - name: Upload Windows client
         uses: actions/upload-artifact@v4
         with:
           name: anylan-client-windows-amd64
           path: out/anylan-client-windows-amd64.msi
+          retention-days: 7
+
+      - name: Upload Windows server
+        uses: actions/upload-artifact@v4
+        with:
+          name: anylan-server-windows-amd64
+          path: out/anylan-server-windows-amd64.exe
           retention-days: 7
 
   darwin:
@@ -71,13 +87,32 @@ jobs:
       - name: Build Darwin client
         run: make build-darwin
 
-      - name: Upload artifacts
+      - name: Upload Darwin client amd64
         uses: actions/upload-artifact@v4
         with:
-          name: anylan-client-darwin
-          path: |
-            out/anylan-client-darwin-amd64
-            out/anylan-client-darwin-arm64
+          name: anylan-client-darwin-amd64
+          path: out/anylan-client-darwin-amd64
+          retention-days: 7
+
+      - name: Upload Darwin client arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: anylan-client-darwin-arm64
+          path: out/anylan-client-darwin-arm64
+          retention-days: 7
+
+      - name: Upload Darwin server amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: anylan-server-darwin-amd64
+          path: out/anylan-server-darwin-amd64
+          retention-days: 7
+
+      - name: Upload Darwin server arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: anylan-server-darwin-arm64
+          path: out/anylan-server-darwin-arm64
           retention-days: 7
 
   docker:
