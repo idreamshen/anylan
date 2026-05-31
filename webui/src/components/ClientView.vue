@@ -28,6 +28,8 @@ const form = reactive({
 })
 
 const busy = computed(() => ['starting', 'connecting', 'connected', 'reconnecting', 'leaving'].includes(props.status.state || ''))
+const joinLoading = computed(() => joining.value || ['starting', 'connecting'].includes(props.status.state || ''))
+const leaveLoading = computed(() => leaving.value || props.status.state === 'leaving')
 const peers = computed(() => props.status.peers || [])
 const deviceItems = computed(() => devices.value.map(device => ({
   title: device.display || device.name || 'Auto-detect',
@@ -271,8 +273,8 @@ function latency(item) {
               </v-col>
             </v-row>
             <v-card-actions class="px-0">
-              <v-btn color="primary" type="submit" variant="flat" :loading="joining" :disabled="busy">Join</v-btn>
-              <v-btn color="error" variant="tonal" :loading="leaving" :disabled="!busy" @click="leave">Leave</v-btn>
+              <v-btn color="primary" type="submit" variant="flat" :loading="joinLoading" :disabled="busy || joining">Join</v-btn>
+              <v-btn color="error" variant="tonal" :loading="leaveLoading" :disabled="!busy || leaving" @click="leave">Leave</v-btn>
             </v-card-actions>
           </v-form>
         </v-card-text>
