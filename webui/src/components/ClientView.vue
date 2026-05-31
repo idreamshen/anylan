@@ -12,6 +12,8 @@ const emit = defineEmits(['refresh'])
 
 const devices = ref([])
 const error = ref('')
+const joining = ref(false)
+const leaving = ref(false)
 const activeTab = ref('status')
 const previous = ref(null)
 const previousAt = ref(Date.now())
@@ -64,6 +66,7 @@ onMounted(async () => {
 })
 
 async function join() {
+  joining.value = true
   try {
     error.value = ''
     const server = serverAddress()
@@ -80,10 +83,13 @@ async function join() {
     emit('refresh')
   } catch (err) {
     error.value = String(err.message || err)
+  } finally {
+    joining.value = false
   }
 }
 
 async function leave() {
+  leaving.value = true
   try {
     error.value = ''
     await postJSON('/api/leave', {})
@@ -91,6 +97,8 @@ async function leave() {
     emit('refresh')
   } catch (err) {
     error.value = String(err.message || err)
+  } finally {
+    leaving.value = false
   }
 }
 
@@ -263,8 +271,8 @@ function latency(item) {
               </v-col>
             </v-row>
             <v-card-actions class="px-0">
-              <v-btn color="primary" type="submit" variant="flat" :disabled="busy">Join</v-btn>
-              <v-btn color="error" variant="tonal" :disabled="!busy" @click="leave">Leave</v-btn>
+              <v-btn color="primary" type="submit" variant="flat" :loading="joining" :disabled="busy">Join</v-btn>
+              <v-btn color="error" variant="tonal" :loading="leaving" :disabled="!busy" @click="leave">Leave</v-btn>
             </v-card-actions>
           </v-form>
         </v-card-text>
