@@ -1,167 +1,55 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository.
+## Project Facts
 
-## Project Overview
+- `anylan` is a Go 1.22 QUIC/UDP relay for room-scoped virtual LANs, with a Vue/Vite/Vuetify WebUI embedded into both binaries.
+- Entrypoints are `cmd/client` and `cmd/server`; `cmd/tapsetup` is Windows-only support code used by the MSI build.
+- Client networking is platform-specific: Linux uses L2 TAP `anylan0`; Windows uses an OpenVPN/tap-windows6-compatible TAP adapter; macOS uses system `utun` in IP-layer mode, so Ethernet broadcast/multicast LAN discovery is not equivalent there.
+- The server allocates one `/24` per room from `--pool` (default `10.240.0.0/12`) and relays frames through `internal/control` plus `internal/relay`.
+- Wire compatibility lives in `internal/protocol`: message type IDs, `Version`, size limits, and join/peer-list JSON structs.
 
-`anylan` is a small Go MVP for a ZeroTier-like virtual LAN aimed at LAN-discovery games.
+## Commands
 
-The current design is intentionally narrow:
-
-- Linux client only.
-- Layer 2 TAP device on the client.
-- Central QUIC/UDP relay server.
-- One room code maps to one isolated broadcast domain.
-- No P2P, NAT traversal, accounts, persistence, DHCP, or GUI.
-
-## Repository Layout
-
-- `cmd/client`: client CLI. Currently supports `join`.
-- `cmd/server`: control + relay server CLI.
-- `internal/client`: QUIC client session and TAP frame bridge.
-- `internal/server`: QUIC server listener, TLS setup, and lifecycle.
-- `internal/control`: server-side join control flow and stream handling.
-- `internal/relay`: room manager, peer allocation, MAC learning, and frame forwarding.
-- `internal/protocol`: wire message framing and JSON control messages.
-- `internal/tap`: Linux TAP device creation and interface configuration.
-
-## Build and Test
-
-Run the full test suite before finishing code changes:
-
-```bash
-make test
-```
-
-Build both binaries:
-
-```bash
-make build
-```
-
-Cross-compile the Windows client:
-
-```bash
-make build-windows
-```
-
-The client uses Linux TAP devices and `ip` commands, so real client runs require Linux and root privileges. Unit tests should not require root.
-
-## Local Manual Run
-
-Start a local relay with an ephemeral self-signed certificate:
-
-```bash
-go run ./cmd/server --listen :4433 --insecure-dev-cert
-```
-
-Start the client WebUI from a Linux client, then join from the WebUI:
-
-```bash
-sudo go run ./cmd/client -- --web 0.0.0.0:18081
-```
-
-For production-like TLS testing, pass `--tls-cert` and `--tls-key` to the server and omit `--insecure-skip-verify` on clients.
-
-## Manual Acceptance
-
-For end-to-end verification, use two Linux client machines:
-
-1. Start `anylan-server` on a reachable UDP port.
-2. Start `anylan-client` on both clients and join from the WebUI with the same room code.
-3. Confirm both TAP interfaces receive `10.240.x.y/24` addresses.
-4. Ping the peer virtual IP in both directions.
-5. Start a LAN-discovery game and verify discovery or direct joining works.
-
-Useful client checks:
-
-```bash
-ip -br addr show anylan0
-ping <peer-virtual-ip>
-```
-
-Cleanup if a TAP device is left behind:
-
-```bash
-sudo ip link delete anylan0
-```
-
-## Reusable Test Servers
-
-The user has provided two Linux servers for recurring real-machine client tests:
-
-- `192.168.89.175` (`anylan-test1`), SSH as `root`.
-- `192.168.89.152` (`anylan-test2`), SSH as `root`.
-
-Two Windows machines are also available (passwordless SSH as `idreamshen`):
-
-- `192.168.89.77` (`gpu-4090-win`), SSH as `idreamshen`.
-- `192.168.89.131` (`gpu-3070-win`), SSH as `idreamshen`.
-
-Use the current development machine as the relay server when appropriate. In the
-current lab network, it has been reachable from the test servers at
-`192.168.89.178`; verify with `hostname -I` before relying on that address.
-
-Typical real-machine smoke test flow:
-
-```bash
-go build -o /tmp/anylan-client ./cmd/client
-go build -o /tmp/anylan-server ./cmd/server
-
-scp /tmp/anylan-client root@192.168.89.175:/tmp/anylan-client
-scp /tmp/anylan-client root@192.168.89.152:/tmp/anylan-client
-
-/tmp/anylan-server --listen :4433 --insecure-dev-cert
-```
-
-Then start client WebUIs on both hosts:
-
-```bash
-ssh root@192.168.89.175 'nohup /tmp/anylan-client --web 0.0.0.0:18081 >/tmp/anylan-client.log 2>&1 &'
-ssh root@192.168.89.152 'nohup /tmp/anylan-client --web 0.0.0.0:18081 >/tmp/anylan-client.log 2>&1 &'
-```
-
-Open each client WebUI or use `/api/join` to join room `manual-smoke`. Confirm
-both clients receive `10.240.x.y/24` addresses, then ping each virtual IP from
-the other test server. Use the WebUI Leave button or `/api/leave` to stop the
-session and confirm no `anylan0` device is left behind.
-
-### Automated L2 smoke test
-
-For a scripted version of the above two-machine flow that also verifies L2
-specifics (ARP broadcast flood, custom EtherType `0x88b5` forwarding, cross-room
-isolation), run:
-
-```bash
-./scripts/manual-l2-test.sh
-```
-
-Defaults match the two test servers above and use the local dev machine as the
-relay. Override with `--remote1`, `--remote2`, `--relay-ip`, `--relay-port`,
-`--room`, or `--dev`. Pass `--keep` to leave the relay and remote clients
-running after the run for follow-up debugging.
-
-The script requires:
-
-- `go` in `PATH` on the dev machine.
-- Passwordless `ssh` as root to both remotes.
-- `iputils-arping`, `tcpdump`, and `python3` on both remotes; the script will
-  `apt-get install` them automatically if missing.
-
-Output is a per-test `PASS/FAIL/SKIP` table; per-test logs land in
-`/tmp/anylan-l2-test-<timestamp>/`. Exit code is `0` if all tests pass.
-
-## Implementation Notes
-
-- Keep protocol changes backward-conscious. `internal/protocol` defines message types, size limits, and the protocol version.
-- Do not put TAP-specific behavior into tests that must run without root.
-- Relay tests should use loopback UDP sockets and in-process QUIC listeners.
-- Rejection paths should write a protocol-level `JoinReject` when possible, rather than only closing the QUIC connection.
-- The relay may log quic-go UDP receive buffer warnings on Linux. These are performance warnings, not necessarily functional failures.
-
-## Style
-
-- Follow existing small-package Go style.
-- Keep abstractions minimal; this repo is intentionally an MVP.
+- Full verification: `make test`.
+- Current-platform binaries: `make build`.
+- Cross-compiles: `make build-linux`, `make build-windows`, `make build-darwin`.
+- Focused Go test: `go test ./internal/relay -run TestForwardUnicastsKnownDestination`.
+- Build commands run `npm --prefix webui ci` and `npm --prefix webui run build` first; this refreshes embedded files under `internal/webui/dist` for `//go:embed`.
+- If only editing Go code and embedded WebUI assets are already present, `go test ./...` is a faster unit-test shortcut than `make test`.
 - Run `gofmt` on edited Go files.
-- Prefer focused tests around protocol, room allocation, and relay forwarding behavior.
+
+## Local Runs
+
+- Local dev relay: `go run ./cmd/server --listen :4433 --insecure-dev-cert --web 127.0.0.1:18080`.
+- Client WebUI: `sudo go run ./cmd/client --web 0.0.0.0:18081` on Linux/macOS, Administrator shell on Windows.
+- Client WebUI join requests need `insecure_skip_verify: true` when connecting to `--insecure-dev-cert` servers.
+- Client settings persist to `os.UserConfigDir()/anylan/client.json`; tests that need isolation should use `NewControllerWithConfig` with a temp path.
+- Cleanup leftover Linux TAP devices with `sudo ip link delete anylan0`.
+
+## Testing Notes
+
+- Unit and integration tests must not require root or real TAP devices; keep TAP behavior behind platform code or test pure helpers.
+- Relay/server integration tests use loopback UDP sockets and in-process QUIC listeners.
+- Rejection paths should write a protocol-level `JoinReject` when possible, not just close the QUIC connection.
+- quic-go UDP receive-buffer warnings on Linux are performance warnings, not necessarily functional failures.
+
+## WebUI And Packaging
+
+- WebUI source is in `webui/src`; Vite outputs to `internal/webui/dist`, which is embedded by `internal/webui/server.go`.
+- Server WebUI defaults to `:18080` in code; client WebUI defaults to `127.0.0.1:18081`.
+- Windows MSI build is `./scripts/build-windows-msi.ps1` on Windows CI; it installs `rsrc`, downloads verified TAP driver artifacts, requires WiX 5.0.2, and honors optional `MSI_VERSION`.
+- Docker image builds only the server binary and includes the embedded WebUI assets from the Node build stage.
+
+## Real-Machine Smoke Tests
+
+- Reusable Linux clients: `root@192.168.89.175` (`anylan-test1`) and `root@192.168.89.152` (`anylan-test2`).
+- Reusable Windows clients: `idreamshen@192.168.89.77` (`gpu-4090-win`) and `idreamshen@192.168.89.131` (`gpu-3070-win`).
+- The dev machine has been reachable as relay at `192.168.89.178`; verify with `hostname -I` before relying on it.
+- Automated Linux L2 smoke test: `./scripts/manual-l2-test.sh`. It builds local binaries, copies the client to both Linux hosts, starts remote WebUIs, checks ICMP, ARP broadcast, EtherType `0x88b5`, and cross-room isolation, then cleans up unless `--keep` is passed.
+- The L2 script requires local `go`, passwordless root SSH to both Linux hosts, and remote `iputils-arping`, `tcpdump`, and `python3`; it will `apt-get install` missing remote tools.
+
+## Change Guidance
+
+- Keep abstractions small; this repo is an MVP with narrow package boundaries.
+- Protocol changes should be backward-conscious and covered in `internal/protocol` tests.
+- Prefer focused tests around protocol framing, room allocation, MAC validation/learning, relay forwarding, WebUI API handlers, and platform-neutral TAP helpers.
