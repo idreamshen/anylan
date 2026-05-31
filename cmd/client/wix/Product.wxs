@@ -12,8 +12,8 @@
     <Launch Condition="Privileged" Message="AnyLAN Client must be installed with administrator privileges." />
     <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of AnyLAN Client is already installed." />
     <Media Id="1" Cabinet="anylan.cab" EmbedCab="yes" />
-    <Icon Id="AnyLANIcon" SourceFile="$(var.IconFile)" />
-    <Property Id="ARPPRODUCTICON" Value="AnyLANIcon" />
+    <Icon Id="AnyLANIcon.ico" SourceFile="$(var.IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="AnyLANIcon.ico" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseFile)" />
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
 
@@ -25,7 +25,7 @@
               Source="$(var.ClientExe)"
               Name="anylan-client.exe"
               KeyPath="yes" />
-          <Shortcut Id="DesktopShortcut" Directory="DesktopFolder" Name="AnyLAN Client" Icon="AnyLANIcon" WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
+          <Shortcut Id="DesktopShortcut" Directory="DesktopFolder" Name="AnyLAN Client" Icon="AnyLANIcon.ico" IconIndex="0" WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
         </Component>
 
         <Component Id="TapSetupComponent" Guid="{294B17BA-64C0-45F7-9CD4-2D7134BA86C5}">
