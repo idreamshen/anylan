@@ -57,9 +57,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: anylan-client-windows-amd64
-          path: |
-            out/anylan-client-windows-amd64.exe
-            out/anylan-client-windows-amd64.msi
+          path: out/anylan-client-windows-amd64.msi
           retention-days: 7
 
   darwin:
