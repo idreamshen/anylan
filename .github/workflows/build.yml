@@ -13,8 +13,8 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.22'
 
@@ -25,28 +25,28 @@ jobs:
         run: make test
 
       - name: Upload Linux client
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: anylan-client-linux-amd64
           path: out/anylan-client-linux-amd64
           retention-days: 7
 
       - name: Upload Linux server
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: anylan-server-linux-amd64
           path: out/anylan-server-linux-amd64
           retention-days: 7
 
   windows:
-    runs-on: windows-2025
+    runs-on: windows-2025-vs2026
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.22'
-      - uses: actions/setup-node@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-node@v6
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
 
@@ -66,14 +66,14 @@ jobs:
         run: go build -o out/anylan-server-windows-amd64.exe ./cmd/server
 
       - name: Upload Windows client
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: anylan-client-windows-amd64
           path: out/anylan-client-windows-amd64.msi
           retention-days: 7
 
       - name: Upload Windows server
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: anylan-server-windows-amd64
           path: out/anylan-server-windows-amd64.exe
@@ -82,8 +82,8 @@ jobs:
   darwin:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.22'
 
@@ -91,28 +91,28 @@ jobs:
         run: make build-darwin
 
       - name: Upload Darwin client amd64
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: anylan-client-darwin-amd64
           path: out/anylan-client-darwin-amd64
           retention-days: 7
 
       - name: Upload Darwin client arm64
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: anylan-client-darwin-arm64
           path: out/anylan-client-darwin-arm64
           retention-days: 7
 
       - name: Upload Darwin server amd64
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: anylan-server-darwin-amd64
           path: out/anylan-server-darwin-amd64
           retention-days: 7
 
       - name: Upload Darwin server arm64
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: anylan-server-darwin-arm64
           path: out/anylan-server-darwin-arm64
@@ -124,10 +124,10 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -135,7 +135,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}/anylan-server
           tags: |
@@ -144,7 +144,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
